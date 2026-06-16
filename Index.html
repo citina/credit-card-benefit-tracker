@@ -135,8 +135,8 @@
     var pct=fee>0?Math.round(real/fee*100):0;
     var width=Math.max(0,Math.min(100,pct));
     var resets=c.feeResetInfo?(' · '+esc(c.feeResetInfo)):'';
-    var prompt=c.openDateMissing
-      ? '<div class="fee-prompt"><a target="_top" href="'+esc(ADD_URL+'&edit='+encodeURIComponent(c.card))+'">'+esc(UI.setOpenDate)+'</a></div>'
+    var prompt=c.anniversaryMissing
+      ? '<div class="fee-prompt"><a target="_top" href="'+esc(ADD_URL+'&edit='+encodeURIComponent(c.card))+'">'+esc(UI.setAnniversary)+'</a></div>'
       : '';
     return '<div class="fee-bar">'+
       '<div class="fee-track"><div class="fee-fill" style="width:'+width+'%"></div></div>'+

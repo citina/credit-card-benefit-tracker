@@ -21,6 +21,8 @@
   .sel,.txt{font:inherit;font-size:15px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%}
   .meta-row{display:flex;gap:14px;flex-wrap:wrap}
   .field-lbl{flex:1;min-width:140px}
+  .ann-row{display:flex;gap:8px}
+  .ann-row select{flex:1;min-width:0}
   #cardOther{margin-top:10px}
   .verified{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.45}
   .hint{color:var(--muted);font-size:14px;padding:2px 2px 10px}
@@ -88,9 +90,19 @@
       <div class="meta-row">
         <label class="field-lbl"><span class="lbl" id="feeLbl"></span>
           <input class="txt" id="feeInput" type="number" min="0" step="1" inputmode="decimal"></label>
-        <label class="field-lbl"><span class="lbl" id="odLbl"></span>
-          <input class="txt" id="odInput" type="date"></label>
+        <div class="field-lbl">
+          <span class="lbl" id="annLbl"></span>
+          <div class="ann-row">
+            <select class="sel" id="annMonth"></select>
+            <select class="sel" id="annDay"></select>
+          </div>
+        </div>
       </div>
+      <div class="meta-row" style="margin-top:14px">
+        <label class="field-lbl"><span class="lbl" id="seedLbl"></span>
+          <input class="txt" id="seedInput" type="number" min="0" step="1" inputmode="decimal"></label>
+      </div>
+      <div class="verified" id="seedHelp"></div>
     </div>
 
     <div class="hint" id="hint"></div>
@@ -123,7 +135,7 @@
 <script>
   var CATALOG = <?!= catalogJson ?>;
   var UI = <?!= uiJson ?>;
-  var META = <?!= metaJson ?>;   // {cardKey: {annualFee, openDate}} — seeded fee defaults for add-mode prefill
+  var META = <?!= metaJson ?>;   // {cardKey: {annualFee, anniversary, ...}} — seeded fee defaults for add-mode prefill
   var EDIT = <?!= editJson ?>;   // null in add mode; {card, benefits:[{id,...}], suggestions, meta} in edit mode
   var LAST_CARD = null;          // refreshed card state after a save, for "keep editing"
   var CARDS = {};
@@ -146,17 +158,43 @@
   document.getElementById('selectAll').textContent = UI.selectAll;
   document.getElementById('clearAll').textContent = UI.clearAll;
   document.getElementById('feeLbl').textContent = UI.annualFeeLabel;
-  document.getElementById('odLbl').textContent = UI.openDateLabel;
+  document.getElementById('annLbl').textContent = UI.anniversaryLabel;
+  document.getElementById('seedLbl').textContent = UI.realizedSeedLabel;
+  document.getElementById('seedHelp').textContent = UI.realizedSeedHelp;
   document.getElementById('feeInput').placeholder = UI.annualFeePlaceholder;
 
-  // Annual fee + open date inputs (the realized-value bar). Shown whenever a card is picked (add) or
-  // always (edit). Prefilled from META (seeded catalog defaults) in add mode, EDIT.meta in edit mode.
+  // Annual fee + anniversary (month/day, no year) + realized-seed inputs — the realized-value bar.
+  // Shown whenever a card is picked (add) or always (edit). Fee prefilled from META (seeded
+  // defaults) in add mode; everything from EDIT.meta in edit mode. Seed is only prefilled in edit.
   var metaCard = document.getElementById('metaCard');
   var feeInput = document.getElementById('feeInput');
-  var odInput = document.getElementById('odInput');
+  var seedInput = document.getElementById('seedInput');
+  var annMonth = document.getElementById('annMonth');
+  var annDay = document.getElementById('annDay');
+  (function(){
+    annMonth.appendChild(new Option('—', ''));
+    (UI.months||[]).forEach(function(name,i){ annMonth.appendChild(new Option(name, String(i+1))); });
+    annDay.appendChild(new Option('—', ''));
+    for(var d=1; d<=31; d++){ annDay.appendChild(new Option(String(d), String(d))); }
+  })();
+  function pad2(n){ return (n<10?'0':'')+n; }
   function cardKey(name){ return String(name==null?'':name).toLowerCase().trim(); }
-  function fillMeta(meta){ meta=meta||{}; feeInput.value=(meta.annualFee>0)?meta.annualFee:''; odInput.value=meta.openDate||''; }
-  function showMeta(meta){ fillMeta(meta); metaCard.style.display=''; }
+  function setAnniversary(mmdd){
+    var m=String(mmdd||'').match(/^(\d{1,2})-(\d{1,2})$/);
+    annMonth.value = m?String(Number(m[1])):'';
+    annDay.value   = m?String(Number(m[2])):'';
+  }
+  function getAnniversary(){
+    if(!annMonth.value || !annDay.value) return '';
+    return pad2(Number(annMonth.value))+'-'+pad2(Number(annDay.value));
+  }
+  function fillMeta(meta, withSeed){
+    meta=meta||{};
+    feeInput.value=(meta.annualFee>0)?meta.annualFee:'';
+    setAnniversary(meta.anniversary||'');
+    seedInput.value=(withSeed && meta.realizedSeed>0)?meta.realizedSeed:'';
+  }
+  function showMeta(meta, withSeed){ fillMeta(meta, withSeed); metaCard.style.display=''; }
   function hideMeta(){ metaCard.style.display='none'; }
 
   // --- card selector ---
@@ -257,7 +295,7 @@
     clearBenefits();
     if(value==='__other__'){
       cardOther.style.display=''; cardOther.value=''; verified.style.display='none';
-      showMeta({});   // new card: blank fee + open date
+      showMeta({}, false);   // new card: blank fee / anniversary / seed
       benefitsBox.appendChild(makeRow({}, true, 'hard'));   // one blank, checked, deletable
       cardOther.focus();
     } else {
@@ -265,7 +303,7 @@
       var c=CARDS[value];
       if(c && c.lastVerified){ verified.textContent=fmt(UI.verified,{date:c.lastVerified}); verified.style.display=''; }
       else { verified.style.display='none'; }
-      showMeta(META[cardKey(value)]);   // prefill the seeded annual-fee default
+      showMeta(META[cardKey(value)], false);   // prefill the seeded annual-fee default (no seed in add mode)
       (c?c.benefits:[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });  // opt-in: tick to add, no ×
     }
   }
@@ -330,7 +368,7 @@
       }
     };
     google.script.run.withSuccessHandler(saveBenefits).withFailureHandler(fail)
-      .setCardMeta(card, feeInput.value, odInput.value);
+      .setCardMeta(card, feeInput.value, getAnniversary(), seedInput.value);
   });
 
   function onAdded(res, card){
@@ -362,7 +400,7 @@
   document.getElementById('erKeep').addEventListener('click', function(){
     if(!LAST_CARD) return;
     EDIT = LAST_CARD;
-    showMeta(EDIT.meta);   // re-prefill from the refreshed card state
+    showMeta(EDIT.meta, true);   // re-prefill from the refreshed card state
     clearBenefits();
     EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });
     (EDIT.suggestions||[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });
@@ -386,7 +424,7 @@
     var subEl=document.getElementById('sub'); subEl.textContent=UI.editSubtitle; subEl.style.display=UI.editSubtitle?'':'none';
     document.getElementById('cardPicker').style.display='none';
     hint.style.display='none';
-    showMeta(EDIT.meta);   // prefill the card's saved annual fee + open date
+    showMeta(EDIT.meta, true);   // prefill the card's saved annual fee + anniversary + seed
     benefitsBox.style.display=''; actions.style.display='';
     document.getElementById('bulkBar').style.display='flex';
     EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });        // current rows: checked, uncheck to remove (custom rows get a Delete button)
