@@ -19,6 +19,8 @@
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
   .lbl{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
   .sel,.txt{font:inherit;font-size:15px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%}
+  .meta-row{display:flex;gap:14px;flex-wrap:wrap}
+  .field-lbl{flex:1;min-width:140px}
   #cardOther{margin-top:10px}
   .verified{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.45}
   .hint{color:var(--muted);font-size:14px;padding:2px 2px 10px}
@@ -82,6 +84,15 @@
       <div class="verified" id="verified" style="display:none"></div>
     </div>
 
+    <div class="card" id="metaCard" style="display:none">
+      <div class="meta-row">
+        <label class="field-lbl"><span class="lbl" id="feeLbl"></span>
+          <input class="txt" id="feeInput" type="number" min="0" step="1" inputmode="decimal"></label>
+        <label class="field-lbl"><span class="lbl" id="odLbl"></span>
+          <input class="txt" id="odInput" type="date"></label>
+      </div>
+    </div>
+
     <div class="hint" id="hint"></div>
     <div id="bulkBar">
       <button class="mark" id="selectAll" type="button"></button>
@@ -112,7 +123,8 @@
 <script>
   var CATALOG = <?!= catalogJson ?>;
   var UI = <?!= uiJson ?>;
-  var EDIT = <?!= editJson ?>;   // null in add mode; {card, benefits:[{id,...}], suggestions:[...]} in edit mode
+  var META = <?!= metaJson ?>;   // {cardKey: {annualFee, openDate}} — seeded fee defaults for add-mode prefill
+  var EDIT = <?!= editJson ?>;   // null in add mode; {card, benefits:[{id,...}], suggestions, meta} in edit mode
   var LAST_CARD = null;          // refreshed card state after a save, for "keep editing"
   var CARDS = {};
   CATALOG.cards.forEach(function(c){ CARDS[c.card] = c; });
@@ -133,6 +145,19 @@
   document.getElementById('cardOther').placeholder = UI.cardNamePlaceholder;
   document.getElementById('selectAll').textContent = UI.selectAll;
   document.getElementById('clearAll').textContent = UI.clearAll;
+  document.getElementById('feeLbl').textContent = UI.annualFeeLabel;
+  document.getElementById('odLbl').textContent = UI.openDateLabel;
+  document.getElementById('feeInput').placeholder = UI.annualFeePlaceholder;
+
+  // Annual fee + open date inputs (the realized-value bar). Shown whenever a card is picked (add) or
+  // always (edit). Prefilled from META (seeded catalog defaults) in add mode, EDIT.meta in edit mode.
+  var metaCard = document.getElementById('metaCard');
+  var feeInput = document.getElementById('feeInput');
+  var odInput = document.getElementById('odInput');
+  function cardKey(name){ return String(name==null?'':name).toLowerCase().trim(); }
+  function fillMeta(meta){ meta=meta||{}; feeInput.value=(meta.annualFee>0)?meta.annualFee:''; odInput.value=meta.openDate||''; }
+  function showMeta(meta){ fillMeta(meta); metaCard.style.display=''; }
+  function hideMeta(){ metaCard.style.display='none'; }
 
   // --- card selector ---
   var sel = document.getElementById('cardSel');
@@ -221,7 +246,7 @@
   function showFormFor(value){
     hideErr();
     if(value===''){
-      cardOther.style.display='none'; verified.style.display='none';
+      cardOther.style.display='none'; verified.style.display='none'; hideMeta();
       clearBenefits(); benefitsBox.style.display='none'; actions.style.display='none';
       document.getElementById('bulkBar').style.display='none';
       hint.style.display=''; return;
@@ -232,6 +257,7 @@
     clearBenefits();
     if(value==='__other__'){
       cardOther.style.display=''; cardOther.value=''; verified.style.display='none';
+      showMeta({});   // new card: blank fee + open date
       benefitsBox.appendChild(makeRow({}, true, 'hard'));   // one blank, checked, deletable
       cardOther.focus();
     } else {
@@ -239,6 +265,7 @@
       var c=CARDS[value];
       if(c && c.lastVerified){ verified.textContent=fmt(UI.verified,{date:c.lastVerified}); verified.style.display=''; }
       else { verified.style.display='none'; }
+      showMeta(META[cardKey(value)]);   // prefill the seeded annual-fee default
       (c?c.benefits:[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });  // opt-in: tick to add, no ×
     }
   }
@@ -293,11 +320,17 @@
       submitBtn.disabled=false; submitBtn.textContent=EDIT?UI.editSubmit:UI.submit;
       showErr(String(err&&err.message||err));
     };
-    if(EDIT){
-      google.script.run.withSuccessHandler(onSaved).withFailureHandler(fail).updateCard(card, items);
-    } else {
-      google.script.run.withSuccessHandler(function(r){ onAdded(r, card); }).withFailureHandler(fail).addBenefits(card, items);
-    }
+    // Save the card's annual fee + open date first, then write the benefits. Two calls (separate
+    // sheets); chaining keeps order and surfaces either failure the same way.
+    var saveBenefits=function(){
+      if(EDIT){
+        google.script.run.withSuccessHandler(onSaved).withFailureHandler(fail).updateCard(card, items);
+      } else {
+        google.script.run.withSuccessHandler(function(r){ onAdded(r, card); }).withFailureHandler(fail).addBenefits(card, items);
+      }
+    };
+    google.script.run.withSuccessHandler(saveBenefits).withFailureHandler(fail)
+      .setCardMeta(card, feeInput.value, odInput.value);
   });
 
   function onAdded(res, card){
@@ -329,6 +362,7 @@
   document.getElementById('erKeep').addEventListener('click', function(){
     if(!LAST_CARD) return;
     EDIT = LAST_CARD;
+    showMeta(EDIT.meta);   // re-prefill from the refreshed card state
     clearBenefits();
     EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });
     (EDIT.suggestions||[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });
@@ -352,6 +386,7 @@
     var subEl=document.getElementById('sub'); subEl.textContent=UI.editSubtitle; subEl.style.display=UI.editSubtitle?'':'none';
     document.getElementById('cardPicker').style.display='none';
     hint.style.display='none';
+    showMeta(EDIT.meta);   // prefill the card's saved annual fee + open date
     benefitsBox.style.display=''; actions.style.display='';
     document.getElementById('bulkBar').style.display='flex';
     EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });        // current rows: checked, uncheck to remove (custom rows get a Delete button)
