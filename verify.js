@@ -43,6 +43,7 @@ vm.createContext(sb); vm.runInContext(code, sb);
 const SR = sb.shouldRemind_, PED = sb.periodEndDate_, DB = sb.daysBetween_, FSD = sb.fmtShortDate_, UC = sb.updateCard, GCR = sb.getCardRows_, U = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
 const PRD = sb.periodRefreshDate_, SUDN = sb.snoozeUntilDayNumber_, DN = sb.dayNumber_;
 const PA = sb.parseAmount_, AFPSY = sb.annualFeePeriodStartYear_, AFRD = sb.annualFeeResetDate_, RAD = sb.realizedAfterDone_, RAU = sb.realizedAfterUndo_;
+const PK = sb.periodKey_, PSDN = sb.periodStartDayNumber_, BPB = sb.benefitPeriodBasis_, NA = sb.normalizeAnniversary_;
 let pass = 0, fail = 0;
 const t = (n, g, e) => { if (JSON.stringify(g) === JSON.stringify(e)) pass++; else { fail++; console.log("  FAIL " + n + ": got " + JSON.stringify(g) + " exp " + JSON.stringify(e)); } };
 // reminders + expiry
@@ -83,6 +84,25 @@ t("realized Unlimited adds 0", RAD(60, 2026, 2026, 'Unlimited'), { value: 60, pe
 t("undo same period subtracts", RAU(70, 2026, 2026, '$10'), 60);
 t("undo floors at 0", RAU(5, 2026, 2026, '$10'), 0);
 t("undo other period untouched", RAU(70, 2025, 2026, '$10'), 70);
+t("afYear accepts MM-DD", AFPSY('06-06', U(2026, 6, 16)), 2026);
+// #1 anniversary normalize (MM-DD; year dropped)
+t("normalizeAnniv MM-DD", NA('06-06'), '06-06');
+t("normalizeAnniv M-D pads", NA('6-6'), '06-06');
+t("normalizeAnniv yyyy-MM-DD legacy", NA('2024-06-06'), '06-06');
+t("normalizeAnniv invalid → blank", NA('13-40'), '');
+t("normalizeAnniv blank", NA(''), '');
+// #3 anniversary-basis period — only 'annual' + basis 'anniversary' shifts off Jan 1
+t("periodKey anniversary after anniv", PK('annual', U(2026, 6, 16), 'anniversary', '06-06'), "2026");
+t("periodKey anniversary before anniv", PK('annual', U(2026, 3, 1), 'anniversary', '06-06'), "2025");
+t("periodKey calendar annual unchanged", PK('annual', U(2026, 6, 16)), "2026");                       // yyyy, no basis
+t("periodKey calendar basis stays calendar", PK('annual', U(2026, 6, 16), 'calendar', '06-06'), "2026");
+t("periodKey monthly ignores basis", PK('monthly', U(2026, 6, 16), 'anniversary', '06-06'), "2026-06"); // only 'annual' shifts
+t("anniv period end date", FSD(PED('annual', U(2026, 6, 16), 'anniversary', '06-06')), "Jun 5");        // day before next anniv
+t("anniv refresh date", FSD(PRD('annual', U(2026, 6, 16), 'anniversary', '06-06')), "Jun 6");
+t("anniv period start = anniversary", PSDN('annual', U(2026, 6, 16), 'anniversary', '06-06') === DN(U(2026, 6, 6)), true);
+t("basis CSR travel = anniversary", BPB('Chase Sapphire Reserve', 'Annual travel credit'), 'anniversary');
+t("basis CSP doordash = calendar", BPB('Chase Sapphire Preferred', 'DoorDash credit (DashPass)'), 'calendar');
+t("basis unknown card = calendar", BPB('Other Card', 'Foo'), 'calendar');
 // updateCard diff + getCardRows suggestions (fake sheet)
 function makeSheet(rows) { var grid = rows.map(r => r.slice()); return {
   getLastRow: () => grid.length + 1,

@@ -27,9 +27,14 @@ const COL = {
 const HEADERS = ['ID', 'Card', 'Benefit', 'Amount', 'Category', 'Reset',
                  'ReminderDays', 'LastDonePeriod', 'LastReminded', 'SnoozeUntil',
                  'RealizedValue', 'RealizedPeriod'];
-// Per-card sheet: annual fee (for the "has it paid for itself" bar) + open date (anchors the
-// annual-fee period / anniversary year). OpenDate kept as plain-text 'yyyy-MM-dd'.
-const CARDS_HEADERS = ['Card', 'AnnualFee', 'OpenDate'];
+// Per-card sheet for the realized-value bar:
+//   AnnualFee          — the fee the bar measures value against
+//   Anniversary        — the card's renewal month/day 'MM-DD' (anchors the annual-fee period AND
+//                        anniversary-basis benefit resets, #3). Plain-text. Year not needed.
+//   RealizedSeed       — a manual "already used this membership year" $ catch-up (for people who
+//                        start tracking mid-year); added to the bar, reset at the anniversary.
+//   RealizedSeedPeriod — the annual-fee-period start year the seed belongs to (lazy reset key).
+const CARDS_HEADERS = ['Card', 'AnnualFee', 'Anniversary', 'RealizedSeed', 'RealizedSeedPeriod'];
 const SNOOZE_PRESETS = [1, 3, 7, 14];  // dashboard snooze choices (days), filtered by expiry
 
 // Category is a closed set; the wizard offers exactly these and addBenefits() coerces anything
@@ -52,10 +57,10 @@ const CATALOG = {
     annualFee: 95,
     benefits: [
       // Chase Travel hotel credit doubled to $100/anniversary year effective 2026-06-15.
-      // ANNIVERSARY-year reset (cardmember year, NOT calendar) — verified 2026-06. The period math
-      // currently treats 'annual' as calendar, so the reset/expiry date is wrong for non-January
-      // opens; see backlog #3 (per-benefit periodBasis + card open date).
-      { benefit: 'Hotel credit (Chase Travel)', amount: '$100', category: 'hotel',  reset: 'annual',  reminderDays: 30 },
+      // ANNIVERSARY-year reset (cardmember year, NOT calendar) — verified 2026-06. periodBasis
+      // 'anniversary' shifts its reset/expiry off Jan 1 to the card's anniversary (#3); needs the
+      // card's Anniversary set, else it falls back to calendar.
+      { benefit: 'Hotel credit (Chase Travel)', amount: '$100', category: 'hotel',  reset: 'annual',  reminderDays: 30, periodBasis: 'anniversary' },
       { benefit: 'DoorDash credit (DashPass)',  amount: '$10',  category: 'dining', reset: 'monthly', reminderDays: 7 },
     ],
   },
@@ -94,8 +99,9 @@ const CATALOG = {
       { benefit: 'DoorDash credit (DashPass)',       amount: '$25',  category: 'dining',  reset: 'monthly',    reminderDays: 7 },  // $5 restaurant + 2×$10 non-restaurant
       { benefit: 'Lyft credit',                      amount: '$10',  category: 'travel',  reset: 'monthly',    reminderDays: 7 },
       { benefit: 'Peloton credit',                   amount: '$120', category: 'other',   reset: 'annual',     reminderDays: 30 },
-      // ANNIVERSARY-year reset (account anniversary, NOT calendar) — verified 2026-06. See backlog #3.
-      { benefit: 'Annual travel credit',             amount: '$300', category: 'travel',  reset: 'annual',     reminderDays: 30 },
+      // ANNIVERSARY-year reset (account anniversary, NOT calendar) — verified 2026-06. periodBasis
+      // 'anniversary' shifts reset/expiry to the card anniversary (#3); needs Anniversary set.
+      { benefit: 'Annual travel credit',             amount: '$300', category: 'travel',  reset: 'annual',     reminderDays: 30, periodBasis: 'anniversary' },
     ],
   },
 };
@@ -150,7 +156,7 @@ const STRINGS = {
     snoozeTooLate: 'This benefit resets too soon to snooze — use it now.',
     accessDenied: 'Access denied — this tracker is private.',
     resetsOn: 'resets {date}',
-    setOpenDate: 'Set open date for accurate timing',
+    setAnniversary: 'Set anniversary for accurate timing',
     sortBy: 'Sort',
     sortExpiry: 'Expiry',
     sortAmount: 'Amount',
@@ -177,8 +183,10 @@ const STRINGS = {
     addBenefitNamePlaceholder: 'Benefit name',
     addAmountPlaceholder: 'e.g. $10',
     annualFeeLabel: 'Annual fee',
-    openDateLabel: 'Card open date',
+    anniversaryLabel: 'Card anniversary',
     annualFeePlaceholder: 'e.g. 95',
+    realizedSeedLabel: 'Already used this year ($)',
+    realizedSeedHelp: 'Value used before tracking; in-app marks add on top. Resets at your anniversary.',
     addAnotherBenefit: '+ Add another benefit',
     addSubmit: 'Add to my tracker',
     addPickCardFirst: 'Select a card to see its benefits.',
@@ -250,7 +258,7 @@ const STRINGS = {
     snoozeTooLate: '这项权益即将重置,来不及推迟了,请尽快使用。',
     accessDenied: '访问被拒绝 — 此追踪器为私有。',
     resetsOn: '{date} 刷新',
-    setOpenDate: '设置开卡日以校准周期',
+    setAnniversary: '设置周年日以校准周期',
     sortBy: '排序',
     sortExpiry: '到期',
     sortAmount: '金额',
@@ -277,8 +285,10 @@ const STRINGS = {
     addBenefitNamePlaceholder: '权益名称',
     addAmountPlaceholder: '例如 $10',
     annualFeeLabel: '年费',
-    openDateLabel: '开卡日',
+    anniversaryLabel: '卡片周年日',
     annualFeePlaceholder: '例如 95',
+    realizedSeedLabel: '本年度已实现 ($)',
+    realizedSeedHelp: '进入追踪前已用掉的价值;之后在 app 里标记的会累加在上面,周年日自动清零。',
     addAnotherBenefit: '+ 添加其他权益',
     addSubmit: '添加到我的追踪',
     addPickCardFirst: '请先选择一张卡查看其权益。',
@@ -412,17 +422,22 @@ function setupCards() {
   const sheet = ss.insertSheet(CONFIG.CARDS_SHEET);
   const rows = [CARDS_HEADERS];
   Object.keys(CATALOG).forEach(function (card) {
-    rows.push([card, Number(CATALOG[card].annualFee) || 0, '']);
+    rows.push([card, Number(CATALOG[card].annualFee) || 0, '', '', '']);  // Anniversary / seed blank
   });
   sheet.getRange(1, 1, rows.length, CARDS_HEADERS.length).setValues(rows);
   sheet.getRange(1, 1, 1, CARDS_HEADERS.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
-  sheet.getRange(2, 3, sheet.getMaxRows() - 1, 1).setNumberFormat('@');  // OpenDate plain-text
+  const maxR = sheet.getMaxRows() - 1;
+  sheet.getRange(2, 3, maxR, 1).setNumberFormat('@');  // Anniversary 'MM-DD' plain-text
+  sheet.getRange(2, 5, maxR, 1).setNumberFormat('@');  // RealizedSeedPeriod (year key) plain-text
   sheet.autoResizeColumns(1, CARDS_HEADERS.length);
 }
 
 // ----------------------------- TIME / PERIOD -----------------------------
-function periodKey_(reset, date) {
+// basis/anniversary are optional; when a benefit is anniversary-based 'annual', its period key is
+// the anniversary-year start year (so done-status holds across the cardmember year, not Jan-Dec).
+function periodKey_(reset, date, basis, anniversary) {
+  if (isAnniversaryAnnual_(reset, basis)) return String(annualFeePeriodStartYear_(anniversary, date));
   const tz = Session.getScriptTimeZone();
   const yyyy = Utilities.formatDate(date, tz, 'yyyy');
   const m = Number(Utilities.formatDate(date, tz, 'MM'));  // 1-12
@@ -446,7 +461,11 @@ function lastDayOfMonthDayNumber_(y, monthOneBased) {
   return Math.floor(Date.UTC(ny, nm - 1, 1) / 86400000) - 1;  // day before the 1st of next month
 }
 // Last usable day of the current period (the benefit's effective expiry), as a day number.
-function periodEndDayNumber_(reset, now) {
+// Anniversary-based 'annual' benefits end the day before the next anniversary, not Dec 31.
+function periodEndDayNumber_(reset, now, basis, anniversary) {
+  if (isAnniversaryAnnual_(reset, basis)) {
+    return anniversaryDayNumber_(anniversary, annualFeePeriodStartYear_(anniversary, now) + 1) - 1;
+  }
   const tz = Session.getScriptTimeZone();
   const y = Number(Utilities.formatDate(now, tz, 'yyyy'));
   const m = Number(Utilities.formatDate(now, tz, 'MM'));  // 1-12
@@ -462,7 +481,10 @@ function firstDayOfMonthDayNumber_(y, monthOneBased) {
 }
 // First day of the current period, as a day number. 'once' has no period boundary → epoch (0),
 // so an undated benefit still gets its single start nudge on the first scan, then never again.
-function periodStartDayNumber_(reset, now) {
+function periodStartDayNumber_(reset, now, basis, anniversary) {
+  if (isAnniversaryAnnual_(reset, basis)) {
+    return anniversaryDayNumber_(anniversary, annualFeePeriodStartYear_(anniversary, now));
+  }
   const tz = Session.getScriptTimeZone();
   const y = Number(Utilities.formatDate(now, tz, 'yyyy'));
   const m = Number(Utilities.formatDate(now, tz, 'MM'));  // 1-12
@@ -480,13 +502,13 @@ function reminderLeadDays_(reset) {
 }
 // The benefit's expiry as a Date (noon-anchored so script-timezone formatting + day math never
 // slip a day). null for 'once' (no expiry).
-function periodEndDate_(reset, now) {
-  const end = periodEndDayNumber_(reset, now);
+function periodEndDate_(reset, now, basis, anniversary) {
+  const end = periodEndDayNumber_(reset, now, basis, anniversary);
   return end === null ? null : new Date(end * 86400000 + 12 * 3600000);
 }
 // First day of the NEXT period — when a used credit refreshes. Noon-anchored Date; null for 'once'.
-function periodRefreshDate_(reset, now) {
-  const end = periodEndDayNumber_(reset, now);
+function periodRefreshDate_(reset, now, basis, anniversary) {
+  const end = periodEndDayNumber_(reset, now, basis, anniversary);
   return end === null ? null : new Date((end + 1) * 86400000 + 12 * 3600000);
 }
 // Calendar date ('yyyy-MM-dd') ↔ day number, on the same basis as dayNumber_ (so picker dates and
@@ -500,12 +522,12 @@ function parseDayNumber_(s) {
   return m ? Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000) : null;
 }
 // Max days we may snooze without the return landing past the expiry. null = no cap.
-function maxSnoozeDays_(reset, now) {
-  const end = periodEndDayNumber_(reset, now);
+function maxSnoozeDays_(reset, now, basis, anniversary) {
+  const end = periodEndDayNumber_(reset, now, basis, anniversary);
   return (end === null) ? null : end - dayNumber_(now);
 }
-function snoozeOptionsFor_(reset, now) {
-  const maxD = maxSnoozeDays_(reset, now);
+function snoozeOptionsFor_(reset, now, basis, anniversary) {
+  const maxD = maxSnoozeDays_(reset, now, basis, anniversary);
   return SNOOZE_PRESETS.filter(function (d) { return maxD === null || d <= maxD; });
 }
 // Pure: the day number a snooze should land on, clamped to the current period so it never overshoots
@@ -513,9 +535,9 @@ function snoozeOptionsFor_(reset, now) {
 //   action 'snooze'     → `arg` is a day count
 //   action 'snoozeEnd'  → through period end ("Never"); no-expiry ('once') → effectively forever
 //   action 'snoozeDate' → `arg` is a 'yyyy-MM-dd' target, clamped to [tomorrow, period end]
-function snoozeUntilDayNumber_(action, reset, now, arg) {
+function snoozeUntilDayNumber_(action, reset, now, arg, basis, anniversary) {
   const todayNum = dayNumber_(now);
-  const endNum = periodEndDayNumber_(reset, now);   // null = no expiry ('once')
+  const endNum = periodEndDayNumber_(reset, now, basis, anniversary);   // null = no expiry ('once')
   if (endNum !== null && endNum <= todayNum) return null;
   if (action === 'snoozeEnd') return (endNum === null) ? todayNum + 36500 : endNum;
   if (action === 'snoozeDate') {
@@ -550,38 +572,63 @@ function parseAmount_(s) {
   return null;
 }
 
-// Month/day of a 'yyyy-MM-dd' open date → {om, od}. Blank / unparseable / out-of-range falls back
-// to Jan 1 ({om:1, od:1}) so the annual-fee period degrades predictably to the calendar year.
-function parseMonthDay_(openDate) {
-  const m = String(openDate == null ? '' : openDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+// Month/day of an anniversary → {om, od}. Accepts 'MM-DD' (the stored form), bare 'M-D', and a
+// legacy 'yyyy-MM-DD'. Blank / unparseable / out-of-range falls back to Jan 1 ({om:1, od:1}) so the
+// annual-fee period (and anniversary resets) degrade predictably to the calendar year.
+function parseMonthDay_(anniversary) {
+  const m = String(anniversary == null ? '' : anniversary).match(/^(?:\d{4}-)?(\d{1,2})-(\d{1,2})$/);
   if (!m) return { om: 1, od: 1 };
-  const om = Number(m[2]), od = Number(m[3]);
+  const om = Number(m[1]), od = Number(m[2]);
   if (om < 1 || om > 12 || od < 1 || od > 31) return { om: 1, od: 1 };
   return { om: om, od: od };
 }
 
+// Day number (script-tz day count, like dayNumber_) of the anniversary in a given year. A Feb-29
+// anniversary approximates to Feb-28.
+function anniversaryDayNumber_(anniversary, year) {
+  const md = parseMonthDay_(anniversary);
+  let om = md.om, od = md.od;
+  if (om === 2 && od === 29) od = 28;
+  return Math.floor(Date.UTC(year, om - 1, od) / 86400000);
+}
+
 // The current annual-fee period, identified by its START YEAR (integer). The period runs from the
-// open month/day this-or-last year to the next anniversary; today on/after this year's anniversary
-// ⇒ the period started this year, else last year. Blank openDate ⇒ Jan 1 ⇒ calendar year.
-function annualFeePeriodStartYear_(openDate, now) {
+// anniversary month/day this-or-last year to the next anniversary; today on/after this year's
+// anniversary ⇒ the period started this year, else last year. Blank anniversary ⇒ Jan 1 ⇒ calendar.
+function annualFeePeriodStartYear_(anniversary, now) {
   const tz = Session.getScriptTimeZone();
   const y = Number(Utilities.formatDate(now, tz, 'yyyy'));
   const m = Number(Utilities.formatDate(now, tz, 'MM'));
   const d = Number(Utilities.formatDate(now, tz, 'dd'));
-  const md = parseMonthDay_(openDate);
+  const md = parseMonthDay_(anniversary);
   const past = (m > md.om) || (m === md.om && d >= md.od);  // today on/after this year's anniversary?
   return past ? y : y - 1;
 }
 
-// The next anniversary Date (start year + 1 at the open month/day) — shown as "resets <date>" under
-// the bar. Noon-anchored + tz-safe like periodRefreshDate_. A Feb-29 open approximates to Feb-28.
-function annualFeeResetDate_(openDate, now) {
-  const md = parseMonthDay_(openDate);
-  let om = md.om, od = md.od;
-  if (om === 2 && od === 29) od = 28;
-  const nextYear = annualFeePeriodStartYear_(openDate, now) + 1;
-  const dn = Math.floor(Date.UTC(nextYear, om - 1, od) / 86400000);
+// The next anniversary Date (start year + 1) — shown as "resets <date>". Noon-anchored + tz-safe.
+function annualFeeResetDate_(anniversary, now) {
+  const dn = anniversaryDayNumber_(anniversary, annualFeePeriodStartYear_(anniversary, now) + 1);
   return new Date(dn * 86400000 + 12 * 3600000);
+}
+
+// True for benefits whose period rolls on the card anniversary instead of the calendar. Only
+// 'annual' benefits are anniversary-based (#3: CSP hotel, CSR travel); everything else stays
+// calendar. periodBasis is sourced from the CATALOG (issuer-determined) via benefitPeriodBasis_.
+function isAnniversaryAnnual_(reset, basis) { return basis === 'anniversary' && reset === 'annual'; }
+
+// The benefit's period basis ('anniversary' | 'calendar'), sourced from the CATALOG by card +
+// benefit name (issuer-determined, not user-set — so no per-benefit UI or stored column). Unknown
+// card/benefit (manual adds, renamed rows) → 'calendar'. Used to derive row.periodBasis on read.
+function benefitPeriodBasis_(card, benefit) {
+  const ck = cardKey_(card), bk = String(benefit == null ? '' : benefit).toLowerCase().trim();
+  let basis = 'calendar';
+  Object.keys(CATALOG).forEach(function (name) {
+    if (cardKey_(name) !== ck) return;
+    CATALOG[name].benefits.forEach(function (b) {
+      if (String(b.benefit).toLowerCase().trim() === bk && b.periodBasis === 'anniversary') basis = 'anniversary';
+    });
+  });
+  return basis;
 }
 
 // Pure accumulator: the new {value, period} after a benefit toggles not-done → done. If the stored
@@ -619,12 +666,15 @@ function readRows_() {
   const last = sheet.getLastRow();
   if (last < 2) return { sheet: sheet, rows: [], missing: false };
   const values = sheet.getRange(2, 1, last - 1, HEADERS.length).getValues();
+  const metaMap = getCardMetaMap_();  // per-card anniversary, for anniversary-basis resets (#3)
   const rows = values.map(function (v, i) {
+    const card = v[COL.CARD - 1];
+    const benefit = v[COL.BENEFIT - 1];
     return {
       rowIndex: i + 2,
       id: String(v[COL.ID - 1]),
-      card: v[COL.CARD - 1],
-      benefit: v[COL.BENEFIT - 1],
+      card: card,
+      benefit: benefit,
       amount: v[COL.AMOUNT - 1],
       category: v[COL.CATEGORY - 1],
       reset: normalizeReset_(v[COL.RESET - 1]),
@@ -634,26 +684,35 @@ function readRows_() {
       snoozeUntil: v[COL.SNOOZE_UNTIL - 1] ? new Date(v[COL.SNOOZE_UNTIL - 1]) : null,
       realizedValue: Number(v[COL.REALIZED_VALUE - 1]) || 0,
       realizedPeriod: String(v[COL.REALIZED_PERIOD - 1] || ''),
+      // #3: a benefit's reset basis is issuer-fixed (derived from CATALOG by name); its card's
+      // anniversary (MM-DD) anchors the period when that basis is 'anniversary'.
+      periodBasis: benefitPeriodBasis_(card, benefit),
+      anniversary: (metaMap[cardKey_(card)] || {}).anniversary || '',
     };
   });
   return { sheet: sheet, rows: rows, missing: false };
 }
-function isDone_(row, now) { return row.lastDonePeriod === periodKey_(row.reset, now); }
+function isDone_(row, now) { return row.lastDonePeriod === periodKey_(row.reset, now, row.periodBasis, row.anniversary); }
 function isSnoozed_(row, now) { return !!(row.snoozeUntil && now < row.snoozeUntil); }
 
 // ----------------------------- CARDS (meta) -----------------------------
 // Per-card annual fee + open date, read from the Cards sheet. Powers the realized-value bar.
 function cardKey_(card) { return String(card == null ? '' : card).toLowerCase().trim(); }
 
-// A stored OpenDate normalized to 'yyyy-MM-dd' (or '' if blank/invalid). Handles both a plain-text
-// string and a Date (in case the user typed into the sheet and Sheets coerced it).
-function normalizeOpenDate_(v) {
+function pad2_(n) { return (n < 10 ? '0' : '') + n; }
+// A stored Anniversary normalized to 'MM-DD' (or '' if blank/invalid). Accepts 'MM-DD', bare 'M-D',
+// a legacy 'yyyy-MM-DD', and a Date (in case the user typed into the sheet and Sheets coerced it).
+function normalizeAnniversary_(v) {
   if (v == null || v === '') return '';
+  let s;
   if (Object.prototype.toString.call(v) === '[object Date]') {
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  }
-  const s = String(v).trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+    s = Utilities.formatDate(v, Session.getScriptTimeZone(), 'MM-dd');
+  } else { s = String(v).trim(); }
+  const m = s.match(/^(?:\d{4}-)?(\d{1,2})-(\d{1,2})$/);
+  if (!m) return '';
+  const om = Number(m[1]), od = Number(m[2]);
+  if (om < 1 || om > 12 || od < 1 || od > 31) return '';
+  return pad2_(om) + '-' + pad2_(od);
 }
 
 function readCardsSheet_() {
@@ -667,7 +726,9 @@ function readCardsSheet_() {
       rowIndex: i + 2,
       card: String(v[0] == null ? '' : v[0]).trim(),
       annualFee: Number(v[1]) || 0,
-      openDate: normalizeOpenDate_(v[2]),
+      anniversary: normalizeAnniversary_(v[2]),
+      realizedSeed: Number(v[3]) || 0,
+      realizedSeedPeriod: String(v[4] == null ? '' : v[4]).trim(),
     };
   });
   return { sheet: sheet, rows: rows, missing: false };
@@ -677,12 +738,16 @@ function readCardsSheet_() {
 function getCardMetaMap_() {
   const map = {};
   readCardsSheet_().rows.forEach(function (r) {
-    if (r.card) map[cardKey_(r.card)] = { annualFee: r.annualFee, openDate: r.openDate };
+    if (r.card) map[cardKey_(r.card)] = {
+      annualFee: r.annualFee, anniversary: r.anniversary,
+      realizedSeed: r.realizedSeed, realizedSeedPeriod: r.realizedSeedPeriod,
+    };
   });
   return map;
 }
 function getCardMeta_(card) {
-  return getCardMetaMap_()[cardKey_(card)] || { annualFee: 0, openDate: '' };
+  return getCardMetaMap_()[cardKey_(card)] ||
+    { annualFee: 0, anniversary: '', realizedSeed: 0, realizedSeedPeriod: '' };
 }
 
 // Header-only creator used by setCardMeta when the Cards sheet doesn't exist yet (e.g. an old
@@ -697,15 +762,20 @@ function ensureCardsSheet_() {
   return sheet;
 }
 
-// Upsert one card's annual fee + open date (google.script.run, from the add/edit wizard). Auth +
-// lock. AnnualFee coerced to a non-negative number; OpenDate stored plain-text 'yyyy-MM-dd' (or '').
-function setCardMeta(card, annualFee, openDate) {
+// Upsert one card's annual fee + anniversary + realized-seed (google.script.run, from the add/edit
+// wizard). Auth + lock. Fee/seed coerced to non-negative numbers; Anniversary stored plain-text
+// 'MM-DD'. The seed is stamped with the current annual-fee period so it lazily resets at the
+// anniversary (a 0 seed clears the period stamp).
+function setCardMeta(card, annualFee, anniversary, realizedSeed) {
   requireAuth_();
   const cardName = String(card == null ? '' : card).trim();
   if (!cardName) throw new Error(t_('addNeedCardName'));
   const fee = Number(annualFee);
   const feeVal = (isFinite(fee) && fee >= 0) ? fee : 0;
-  const od = normalizeOpenDate_(openDate);
+  const ann = normalizeAnniversary_(anniversary);
+  const seedN = Number(realizedSeed);
+  const seedVal = (isFinite(seedN) && seedN > 0) ? seedN : 0;
+  const seedPeriod = seedVal > 0 ? String(annualFeePeriodStartYear_(ann, new Date())) : '';
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -713,9 +783,10 @@ function setCardMeta(card, annualFee, openDate) {
     const key = cardKey_(cardName);
     const existing = readCardsSheet_().rows.filter(function (r) { return cardKey_(r.card) === key; })[0];
     const rowIndex = existing ? existing.rowIndex : sheet.getLastRow() + 1;
-    sheet.getRange(rowIndex, 1, 1, CARDS_HEADERS.length).setValues([[cardName, feeVal, od]]);
-    sheet.getRange(rowIndex, 3).setNumberFormat('@').setValue(od);  // keep OpenDate plain-text
-    return { card: cardName, annualFee: feeVal, openDate: od };
+    sheet.getRange(rowIndex, 1, 1, CARDS_HEADERS.length).setValues([[cardName, feeVal, ann, seedVal, seedPeriod]]);
+    sheet.getRange(rowIndex, 3).setNumberFormat('@').setValue(ann);          // Anniversary plain-text
+    sheet.getRange(rowIndex, 5).setNumberFormat('@').setValue(seedPeriod);   // seed period plain-text
+    return { card: cardName, annualFee: feeVal, anniversary: ann, realizedSeed: seedVal };
   } finally {
     lock.releaseLock();
   }
@@ -786,6 +857,9 @@ function getCardRows_(card) {
     return { benefit: b.benefit, amount: b.amount, category: b.category, reset: b.reset, reminderDays: b.reminderDays };
   });
   const cardName = rows.length ? rows[0].card : card;
+  const m = getCardMeta_(cardName);
+  const afYear = annualFeePeriodStartYear_(m.anniversary, new Date());
+  const effSeed = (String(m.realizedSeedPeriod) === String(afYear)) ? m.realizedSeed : 0;
   return {
     card: cardName,
     benefits: rows.map(function (r) {
@@ -794,7 +868,9 @@ function getCardRows_(card) {
                custom: !catNames[String(r.benefit).toLowerCase().trim()] };  // true = user-added (not in catalog)
     }),
     suggestions: suggestions,
-    meta: getCardMeta_(cardName),  // { annualFee, openDate } — prefilled into the edit form
+    // Prefilled into the edit form. Seed shown only when it belongs to the current period (a stale
+    // seed reads as 0, so re-saving the card won't accidentally revive it).
+    meta: { annualFee: m.annualFee, anniversary: m.anniversary, realizedSeed: effSeed },
   };
 }
 
@@ -806,9 +882,9 @@ function getCardRows_(card) {
 function shouldRemind_(row, now) {
   const today = dayNumber_(now);
   const lr = row.lastReminded ? dayNumber_(row.lastReminded) : -Infinity;
-  const start = periodStartDayNumber_(row.reset, now);
+  const start = periodStartDayNumber_(row.reset, now, row.periodBasis, row.anniversary);
   if (today >= start && lr < start) return true;                 // start-of-period nudge
-  const end = periodEndDayNumber_(row.reset, now);
+  const end = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);
   if (end !== null) {
     const windowStart = end - reminderLeadDays_(row.reset) + 1;
     if (today >= windowStart && lr < windowStart) return true;   // near-expiry nudge
@@ -947,7 +1023,7 @@ function confirmPage_(action, params) {
   if (!row) return htmlMessage_(t_('notFound'));
   let days = Number(params.days) || CONFIG.SNOOZE_DEFAULT_DAYS;
   if (action === 'snooze') {
-    const maxD = maxSnoozeDays_(row.reset, new Date());  // show the capped value in the question
+    const maxD = maxSnoozeDays_(row.reset, new Date(), row.periodBasis, row.anniversary);  // capped value in the question
     if (maxD !== null && maxD >= 1) days = Math.min(days, maxD);
   }
   const question = action === 'done'
@@ -1190,7 +1266,7 @@ function applyAction_(action, id, days) {
       // overwrite it below. Cross-period stored values reset inside realizedAfterDone_.
       const wasDone = isDone_(row, now);
       if (!wasDone) {
-        const afYear = annualFeePeriodStartYear_(getCardMeta_(row.card).openDate, now);
+        const afYear = annualFeePeriodStartYear_(row.anniversary, now);
         const r = realizedAfterDone_(row.realizedValue, row.realizedPeriod, afYear, row.amount);
         data.sheet.getRange(row.rowIndex, COL.REALIZED_VALUE).setValue(r.value);
         data.sheet.getRange(row.rowIndex, COL.REALIZED_PERIOD).setNumberFormat('@').setValue(String(r.period));
@@ -1198,7 +1274,7 @@ function applyAction_(action, id, days) {
       // Force plain-text format first, or Sheets coerces a monthly key like "2026-06" into a
       // Date — which then never matches periodKey_() on read (the benefit looks un-done).
       data.sheet.getRange(row.rowIndex, COL.LAST_DONE_PERIOD)
-        .setNumberFormat('@').setValue(periodKey_(row.reset, now));
+        .setNumberFormat('@').setValue(periodKey_(row.reset, now, row.periodBasis, row.anniversary));
       data.sheet.getRange(row.rowIndex, COL.SNOOZE_UNTIL).setValue('');
       return { ok: true, key: 'doneOk', name: row.benefit };
     }
@@ -1206,7 +1282,7 @@ function applyAction_(action, id, days) {
       // Reverse the realized value only when this undo actually reverses a done in the CURRENT fee
       // period (else there's nothing in this period to subtract); floor at 0.
       if (isDone_(row, now)) {
-        const afYear = annualFeePeriodStartYear_(getCardMeta_(row.card).openDate, now);
+        const afYear = annualFeePeriodStartYear_(row.anniversary, now);
         if (Number(row.realizedPeriod) === afYear) {
           data.sheet.getRange(row.rowIndex, COL.REALIZED_VALUE)
             .setValue(realizedAfterUndo_(row.realizedValue, row.realizedPeriod, afYear, row.amount));
@@ -1221,7 +1297,7 @@ function applyAction_(action, id, days) {
     }
     // snooze variants ('snooze' day-count · 'snoozeEnd' = "Never" · 'snoozeDate' = picked date),
     // all clamped so the return never lands past the benefit's expiry (see snoozeUntilDayNumber_).
-    const untilNum = snoozeUntilDayNumber_(action, row.reset, now, days);
+    const untilNum = snoozeUntilDayNumber_(action, row.reset, now, days, row.periodBasis, row.anniversary);
     if (untilNum === null) return { ok: false, key: 'snoozeTooLate', name: row.benefit };
     data.sheet.getRange(row.rowIndex, COL.SNOOZE_UNTIL)
       .setValue(new Date(untilNum * 86400000 + 12 * 3600000));     // noon-anchored, tz-safe
@@ -1239,12 +1315,14 @@ function buildDashboardData_() {
   const order = [];
   data.rows.forEach(function (row) {
     if (!cards[row.card]) {
-      const meta = metaMap[cardKey_(row.card)] || { annualFee: 0, openDate: '' };
+      const meta = metaMap[cardKey_(row.card)] || { annualFee: 0, anniversary: '', realizedSeed: 0, realizedSeedPeriod: '' };
+      const afYear = annualFeePeriodStartYear_(meta.anniversary, now);
+      // The manual realized-seed counts only while it belongs to the current fee period (lazy reset).
+      const seed = (String(meta.realizedSeedPeriod) === String(afYear)) ? (Number(meta.realizedSeed) || 0) : 0;
       cards[row.card] = {
         card: row.card, benefits: [],
-        annualFee: meta.annualFee, openDate: meta.openDate,
-        afYear: annualFeePeriodStartYear_(meta.openDate, now),
-        realized: 0, hasParseable: false,
+        annualFee: meta.annualFee, anniversary: meta.anniversary,
+        afYear: afYear, realized: seed, hasParseable: false,
       };
       order.push(row.card);
     }
@@ -1256,19 +1334,19 @@ function buildDashboardData_() {
     if (String(row.realizedPeriod) === String(cardObj.afYear)) cardObj.realized += row.realizedValue;
     const done = isDone_(row, now);
     const snoozed = isSnoozed_(row, now);
-    const endNum = periodEndDayNumber_(row.reset, now);            // null = no expiry ('once')
+    const endNum = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);  // null = no expiry ('once')
     const daysLeft = (endNum === null) ? null : endNum - dayNumber_(now);  // sort key; days to period end
     // For a still-to-use benefit, how long until it resets (days left + expiry date). Skipped for
     // done/snoozed rows (those show their own status) and 'once' (no expiry).
     let expiryInfo = '';
     if (!done && !snoozed && endNum !== null) {
       expiryInfo = daysLeft <= 0 ? t_('expiryToday')
-        : fmt_(t_('expiryInfo'), { n: daysLeft, date: fmtShortDate_(periodEndDate_(row.reset, now)) });
+        : fmt_(t_('expiryInfo'), { n: daysLeft, date: fmtShortDate_(periodEndDate_(row.reset, now, row.periodBasis, row.anniversary)) });
     }
     // For a done benefit, when the credit refreshes (start of next period). Skipped for 'once'.
     let refreshInfo = '';
     if (done) {
-      const refresh = periodRefreshDate_(row.reset, now);
+      const refresh = periodRefreshDate_(row.reset, now, row.periodBasis, row.anniversary);
       if (refresh) refreshInfo = fmt_(t_('resetsOn'), { date: fmtShortDate_(refresh) });
     }
     cards[row.card].benefits.push({
@@ -1277,21 +1355,21 @@ function buildDashboardData_() {
       snoozeInfo: snoozed ? fmt_(t_('snoozedUntil'), { date: fmtShortDate_(row.snoozeUntil) }) : '',
       expiryInfo: expiryInfo,
       refreshInfo: refreshInfo,
-      snoozeOptions: (!done && !snoozed) ? snoozeOptionsFor_(row.reset, now) : [],
+      snoozeOptions: (!done && !snoozed) ? snoozeOptionsFor_(row.reset, now, row.periodBasis, row.anniversary) : [],
       snoozeMaxDate: (!done && !snoozed && endNum !== null) ? ymdFromDayNumber_(endNum) : '',  // date-picker cap
     });
   });
   return { cards: order.map(function (k) {
     const c = cards[k];
     // Show the realized-value bar only for cards with a fee AND at least one $-amount benefit
-    // (a card with no parseable amounts could never move off 0). When shown without an open date,
+    // (a card with no parseable amounts could never move off 0). When shown without an anniversary,
     // accumulation falls back to the calendar year and we flag it so the UI can nudge the user.
     const showBar = c.annualFee > 0 && c.hasParseable;
     return {
       card: c.card, benefits: c.benefits,
       annualFee: c.annualFee, realized: c.realized, showBar: showBar,
-      feeResetInfo: showBar ? fmt_(t_('resetsOn'), { date: fmtShortDate_(annualFeeResetDate_(c.openDate, now)) }) : '',
-      openDateMissing: showBar && !c.openDate,
+      feeResetInfo: showBar ? fmt_(t_('resetsOn'), { date: fmtShortDate_(annualFeeResetDate_(c.anniversary, now)) }) : '',
+      anniversaryMissing: showBar && !c.anniversary,
     };
   }) };
 }
@@ -1312,7 +1390,7 @@ function uiStrings_() {
     saving: t_('saving'), loading: t_('loading'), resets: t_('resets'),
     resetLabels: { monthly: t_('resetMonthly'), quarterly: t_('resetQuarterly'),
       semiannual: t_('resetSemiannual'), annual: t_('resetAnnual'), once: t_('resetOnce') },
-    needSetup: t_('needSetup'), setOpenDate: t_('setOpenDate'),
+    needSetup: t_('needSetup'), setAnniversary: t_('setAnniversary'),
   };
 }
 
@@ -1329,7 +1407,11 @@ function addUiStrings_() {
     colBenefit: t_('addColBenefit'), colAmount: t_('addColAmount'),
     colCategory: t_('addColCategory'), colReset: t_('addColReset'),
     benefitNamePlaceholder: t_('addBenefitNamePlaceholder'), amountPlaceholder: t_('addAmountPlaceholder'),
-    annualFeeLabel: t_('annualFeeLabel'), openDateLabel: t_('openDateLabel'), annualFeePlaceholder: t_('annualFeePlaceholder'),
+    annualFeeLabel: t_('annualFeeLabel'), anniversaryLabel: t_('anniversaryLabel'), annualFeePlaceholder: t_('annualFeePlaceholder'),
+    realizedSeedLabel: t_('realizedSeedLabel'), realizedSeedHelp: t_('realizedSeedHelp'),
+    months: (CONFIG.LANG === 'zh')
+      ? ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+      : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     addBenefit: t_('addAnotherBenefit'), submit: t_('addSubmit'), cancel: t_('confirmCancel'),
     selectAll: t_('addSelectAll'), clearAll: t_('addClearAll'),
     pickCardFirst: t_('addPickCardFirst'), needCardName: t_('addNeedCardName'), needOne: t_('addNeedOne'), needName: t_('addNeedName'),
