@@ -25,6 +25,14 @@
   .card-name{font-size:16px;font-weight:500;margin-bottom:12px}
   .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
   .card-head .card-name{margin-bottom:0}
+  /* annual-fee "has it paid for itself" bar — flat, low-saturation, no shadow */
+  .fee-bar{margin:-4px 0 14px}
+  .fee-track{height:8px;background:var(--gray-bg);border-radius:12px;overflow:hidden}
+  .fee-fill{height:100%;background:#bcd99a;border-radius:12px}
+  .fee-text{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .fee-prompt{font-size:12.5px;margin-top:3px}
+  .fee-prompt a{color:#185FA5;text-decoration:none}
+  .fee-prompt a:hover{text-decoration:underline}
   .kebab-wrap{position:relative;display:inline-flex}
   button.kebab{font-size:18px;line-height:1;padding:2px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;background:none;color:var(--muted)}
   button.kebab:hover{background:var(--bg);border-color:var(--border)}
@@ -117,6 +125,24 @@
   function stat(n,l){return '<div class="stat"><div class="n">'+n+'</div><div class="l">'+esc(l)+'</div></div>'}
   function resetLabel(r){return (UI.resetLabels&&UI.resetLabels[r])||r}
   function btn(action,id,label){return '<button class="mark" data-act="'+esc(action)+'" data-id="'+esc(id)+'">'+esc(label)+'</button>'}
+  function money(n){ n=Math.round((Number(n)||0)*100)/100; return '$'+(n%1===0?n:n.toFixed(2)); }
+  // Per-card "realized value / annual fee" bar. Server gates visibility (c.showBar). pct can exceed
+  // 100% (shown in text); the fill width is clamped to 100%. If the card has no open date, a subtle
+  // link nudges the user to set it (accumulation is on the calendar year until they do).
+  function feeBar(c){
+    if(!c.showBar) return '';
+    var fee=Number(c.annualFee)||0, real=Number(c.realized)||0;
+    var pct=fee>0?Math.round(real/fee*100):0;
+    var width=Math.max(0,Math.min(100,pct));
+    var resets=c.feeResetInfo?(' · '+esc(c.feeResetInfo)):'';
+    var prompt=c.openDateMissing
+      ? '<div class="fee-prompt"><a target="_top" href="'+esc(ADD_URL+'&edit='+encodeURIComponent(c.card))+'">'+esc(UI.setOpenDate)+'</a></div>'
+      : '';
+    return '<div class="fee-bar">'+
+      '<div class="fee-track"><div class="fee-fill" style="width:'+width+'%"></div></div>'+
+      '<div class="fee-text">'+esc(money(real))+' / '+esc(money(fee))+' · '+pct+'%'+resets+'</div>'+
+      prompt+'</div>';
+  }
   // Snooze is two-step. Tap Snooze → a menu (Pick a date / Never / Cancel). Tap "Pick a date" →
   // a date input + Confirm / Cancel. snoozeDate (the picked date) defers reminders until that day;
   // Never (snoozeEnd) defers through period end. The <input> min/max are UX hints; server re-clamps.
@@ -174,6 +200,7 @@
     document.getElementById('cards').innerHTML=data.cards.map(function(c){
       return '<div class="card"><div class="card-head"><div class="card-name">'+esc(c.card)+'</div>'+
         menuCard(c.card)+'</div>'+
+        feeBar(c)+
         sortBenefits(c.benefits).map(function(b){
           var badge=b.done?'<span class="badge b-done">'+esc(UI.badgeDone)+'</span>'
             :b.snoozed?'<span class="badge b-snooze">'+esc(UI.badgeSnoozed)+'</span>'
