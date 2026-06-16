@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#faf9f5;--surface:#fff;--text:#1a1a18;--muted:#6b6a64;--border:#e6e4dc;
+    --green:#0F6E56;--blue:#185FA5;--err:#9a2218;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px}
+  .wrap{max-width:720px;margin:0 auto}
+  .head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  h1{font-size:22px;font-weight:500}
+  .addlink{font-size:14px;font-weight:500;color:var(--blue);text-decoration:none;white-space:nowrap}
+  .addlink:hover{text-decoration:underline}
+  .sub{font-size:14px;color:var(--muted);margin-bottom:24px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  .lbl{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .sel,.txt{font:inherit;font-size:15px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%}
+  #cardOther{margin-top:10px}
+  .verified{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.45}
+  .hint{color:var(--muted);font-size:14px;padding:2px 2px 10px}
+  #bulkBar{display:none;gap:8px;margin-bottom:12px}
+  /* benefit rows */
+  .ben{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .ben.removed{opacity:.5}
+  .ben-head{display:flex;align-items:center;gap:10px}
+  .chk{width:18px;height:18px;flex:none;accent-color:var(--green);cursor:pointer}
+  .f-name{flex:1;min-width:0;font:inherit;font-size:15px;font-weight:500;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}
+  .rm{flex:none;border:none;background:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:2px 8px;border-radius:6px}
+  .rm:hover{background:var(--bg);color:var(--text)}
+  .del-btn{flex:none;border:1px solid var(--err);background:none;color:var(--err);font:inherit;font-size:12px;padding:5px 10px;border-radius:7px;cursor:pointer}
+  .del-btn:hover{background:#fbeae8}
+  .ben-grid{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding-left:28px}
+  .field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:92px}
+  .field .cap{font-size:11.5px;color:var(--muted)}
+  .field input,.field select{font:inherit;font-size:14px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%}
+  /* actions */
+  .row-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button.mark{font:inherit;font-size:13px;padding:9px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text)}
+  button.mark:hover{background:var(--bg)}
+  .spacer{flex:1}
+  .btn{font:inherit;font-size:15px;padding:10px 18px;border-radius:8px;cursor:pointer;text-decoration:none;display:inline-block;border:1px solid var(--border);text-align:center}
+  .btn.primary{background:var(--green);color:#fff;border-color:var(--green)}
+  .btn.primary:disabled{opacity:.5;cursor:default}
+  .btn.ghost{background:var(--surface);color:var(--text)}
+  #cancel{background:#f1efe8;border-color:#ddd9cf}
+  .err{color:var(--err);font-size:13.5px;margin-top:10px}
+  /* success banner */
+  #banner{display:flex;align-items:center;gap:12px;background:#EAF3DE;color:#27500A;border:1px solid #cfe3b6;border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:14px}
+  #bannerMsg{flex:1}
+  .banner-link{color:#27500A;font-weight:500;text-decoration:underline;white-space:nowrap}
+  .banner-x{border:none;background:none;color:#27500A;font-size:18px;line-height:1;cursor:pointer;padding:0 2px;opacity:.7}
+  .banner-x:hover{opacity:1}
+  /* edit success summary */
+  #editResult .er-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}
+  .er-title{font-size:17px;font-weight:500}
+  #erLines .er-line{font-size:14px;padding:3px 0;line-height:1.45}
+  .er-line .er-label{color:var(--muted);margin-right:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1 id="title"></h1>
+    <a class="addlink" id="dashlink" href="<?= dashUrl ?>"></a>
+  </div>
+  <div class="sub" id="sub"></div>
+
+  <div id="banner" style="display:none">
+    <span id="bannerMsg"></span>
+    <button id="bannerClose" class="banner-x" type="button" aria-label="close">×</button>
+  </div>
+
+  <div id="form">
+    <div class="card" id="cardPicker">
+      <label class="lbl" id="cardLbl" for="cardSel"></label>
+      <select class="sel" id="cardSel"></select>
+      <input class="txt" id="cardOther" type="text" style="display:none">
+      <div class="verified" id="verified" style="display:none"></div>
+    </div>
+
+    <div class="hint" id="hint"></div>
+    <div id="bulkBar">
+      <button class="mark" id="selectAll" type="button"></button>
+      <button class="mark" id="clearAll" type="button"></button>
+    </div>
+    <div id="benefits" style="display:none"></div>
+
+    <div id="actions" style="display:none">
+      <div class="row-actions">
+        <button class="mark" id="addBenefit" type="button"></button>
+        <span class="spacer"></span>
+        <a class="btn ghost" id="cancel" href="<?= dashUrl ?>"></a>
+        <button class="btn primary" id="submit" type="button"></button>
+      </div>
+      <div class="err" id="err" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="card" id="editResult" style="display:none">
+    <div class="er-head">
+      <div class="er-title" id="erTitle"></div>
+      <button class="btn ghost" id="erKeep" type="button"></button>
+    </div>
+    <div id="erLines"></div>
+  </div>
+
+</div>
+<script>
+  var CATALOG = <?!= catalogJson ?>;
+  var UI = <?!= uiJson ?>;
+  var EDIT = <?!= editJson ?>;   // null in add mode; {card, benefits:[{id,...}], suggestions:[...]} in edit mode
+  var LAST_CARD = null;          // refreshed card state after a save, for "keep editing"
+  var CARDS = {};
+  CATALOG.cards.forEach(function(c){ CARDS[c.card] = c; });
+
+  function fmt(s,obj){ return String(s).replace(/\{(\w+)\}/g,function(m,k){ return obj&&obj[k]!=null?obj[k]:m; }); }
+  function opt(value,label){ var o=document.createElement('option'); o.value=value; o.textContent=label; return o; }
+
+  // --- static text ---
+  document.getElementById('title').textContent = UI.title;
+  document.getElementById('sub').textContent = UI.subtitle;
+  document.getElementById('dashlink').textContent = UI.openDash;
+  document.getElementById('cardLbl').textContent = UI.cardLabel;
+  document.getElementById('hint').textContent = UI.pickCardFirst;
+  document.getElementById('addBenefit').textContent = UI.addBenefit;
+  document.getElementById('cancel').textContent = UI.cancel;
+  document.getElementById('submit').textContent = UI.submit;
+  document.getElementById('erKeep').textContent = UI.keepEditing;
+  document.getElementById('cardOther').placeholder = UI.cardNamePlaceholder;
+  document.getElementById('selectAll').textContent = UI.selectAll;
+  document.getElementById('clearAll').textContent = UI.clearAll;
+
+  // --- card selector ---
+  var sel = document.getElementById('cardSel');
+  sel.appendChild(opt('', UI.cardPlaceholder));
+  CATALOG.cards.forEach(function(c){ sel.appendChild(opt(c.card, c.card)); });
+  sel.appendChild(opt('__other__', UI.cardOther));
+
+  var benefitsBox = document.getElementById('benefits');
+  var actions = document.getElementById('actions');
+  var verified = document.getElementById('verified');
+  var hint = document.getElementById('hint');
+  var cardOther = document.getElementById('cardOther');
+  var errBox = document.getElementById('err');
+  var submitBtn = document.getElementById('submit');
+
+  function showErr(m){ errBox.textContent=m; errBox.style.display=''; }
+  function hideErr(){ errBox.textContent=''; errBox.style.display='none'; }
+
+  // build a <select> from {value,label} options, preselecting `current`
+  function selectEl(options, current, cls){
+    var s=document.createElement('select'); s.className=cls;
+    options.forEach(function(v){ var o=opt(v.value,v.label); if(v.value===current) o.selected=true; s.appendChild(o); });
+    return s;
+  }
+  function catOptions(){ return UI.categories.map(function(c){ return {value:c, label:(UI.catLabels[c]||c)}; }); }
+  function resetOptions(){ return UI.resets.map(function(r){ return {value:r, label:(UI.resetLabels[r]||r)}; }); }
+  function field(caption, control){
+    var w=document.createElement('label'); w.className='field';
+    var cap=document.createElement('span'); cap.className='cap'; cap.textContent=caption;
+    w.appendChild(cap); w.appendChild(control); return w;
+  }
+
+  // One editable benefit row. `checked` sets the include box. `recoverable` rows (catalog
+  // prefills / existing rows in edit mode) dim-and-keep on × so a mis-click is undoable; plain
+  // manually-added rows hard-delete on ×.
+  function makeRow(b, checked, removable){  // removable: 'none' | 'hard' | 'soft'
+    b = b || {};
+    var row=document.createElement('div'); row.className='ben';
+    var chk=document.createElement('input'); chk.type='checkbox'; chk.className='chk'; chk.checked=!!checked;
+    var name=document.createElement('input'); name.type='text'; name.className='f-name';
+    name.placeholder=UI.benefitNamePlaceholder; name.value=b.benefit||'';
+    var amt=document.createElement('input'); amt.type='text'; amt.className='f-amt';
+    amt.placeholder=UI.amountPlaceholder; amt.value=b.amount||'';
+    var cat=selectEl(catOptions(), b.category||'other', 'f-cat');
+    var rst=selectEl(resetOptions(), b.reset||'monthly', 'f-rst');
+    var head=document.createElement('div'); head.className='ben-head';
+    head.appendChild(chk); head.appendChild(name);
+    // × only on rows that are in the result by default: manual rows (hard delete) and existing
+    // rows in edit mode (soft, recoverable). Catalog prefills / suggestions have none — tick to add.
+    if(removable && removable!=='none'){
+      var rm=document.createElement('button'); rm.type='button'; rm.className='rm'; rm.textContent='×'; rm.setAttribute('aria-label','remove');
+      var removed=false;
+      rm.addEventListener('click', function(){
+        if(removable==='hard'){ row.parentNode.removeChild(row); return; }
+        removed=!removed;
+        row.classList.toggle('removed', removed);
+        chk.disabled=removed; name.disabled=removed; amt.disabled=removed; cat.disabled=removed; rst.disabled=removed;
+        rm.textContent=removed?'↺':'×'; rm.setAttribute('aria-label', removed?'restore':'remove');
+      });
+      head.appendChild(rm);
+    }
+    // Edit mode: a user-added (non-catalog) benefit gets an explicit Delete button once unchecked —
+    // it isn't offered by the catalog, so it can't be re-added from suggestions. Catalog benefits are
+    // removed simply by unchecking (updateCard deletes any of this card's rows that aren't resubmitted).
+    if(b.custom && b.id){
+      var del=document.createElement('button'); del.type='button'; del.className='del-btn';
+      del.textContent=UI.deleteBenefit; del.style.display='none';
+      del.addEventListener('click', function(){ if(row.parentNode) row.parentNode.removeChild(row); });
+      chk.addEventListener('change', function(){ del.style.display = chk.checked ? 'none' : ''; });
+      head.appendChild(del);
+    }
+    var grid=document.createElement('div'); grid.className='ben-grid';
+    grid.appendChild(field(UI.colAmount, amt));
+    grid.appendChild(field(UI.colCategory, cat));
+    grid.appendChild(field(UI.colReset, rst));
+    row.appendChild(head); row.appendChild(grid);
+
+    row._fields={chk:chk,name:name,amt:amt,cat:cat,rst:rst};
+    row._reminderDays=(b.reminderDays!=null?b.reminderDays:null);  // period-driven; carried through, not shown
+    row._id=b.id||'';                                              // present for existing rows (edit mode)
+    return row;
+  }
+
+  function clearBenefits(){ benefitsBox.innerHTML=''; }
+
+  function showFormFor(value){
+    hideErr();
+    if(value===''){
+      cardOther.style.display='none'; verified.style.display='none';
+      clearBenefits(); benefitsBox.style.display='none'; actions.style.display='none';
+      document.getElementById('bulkBar').style.display='none';
+      hint.style.display=''; return;
+    }
+    hint.style.display='none';
+    benefitsBox.style.display=''; actions.style.display='';
+    document.getElementById('bulkBar').style.display='flex';
+    clearBenefits();
+    if(value==='__other__'){
+      cardOther.style.display=''; cardOther.value=''; verified.style.display='none';
+      benefitsBox.appendChild(makeRow({}, true, 'hard'));   // one blank, checked, deletable
+      cardOther.focus();
+    } else {
+      cardOther.style.display='none';
+      var c=CARDS[value];
+      if(c && c.lastVerified){ verified.textContent=fmt(UI.verified,{date:c.lastVerified}); verified.style.display=''; }
+      else { verified.style.display='none'; }
+      (c?c.benefits:[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });  // opt-in: tick to add, no ×
+    }
+  }
+
+  function currentCardName(){
+    return sel.value==='__other__' ? cardOther.value.trim() : sel.value;
+  }
+  function collectItems(){
+    var items=[];
+    Array.prototype.forEach.call(benefitsBox.querySelectorAll('.ben'), function(row){
+      if(row.classList.contains('removed')) return;
+      var f=row._fields, name=f.name.value.trim();
+      if(!f.chk.checked || !name) return;
+      var item={ benefit:name, amount:f.amt.value.trim(), category:f.cat.value, reset:f.rst.value };
+      if(row._id) item.id=row._id;                                    // existing row → update in place
+      if(row._reminderDays!=null) item.reminderDays=row._reminderDays; // carry catalog value through
+      items.push(item);
+    });
+    return items;
+  }
+  function hasBlankCheckedRow(){
+    var rows=benefitsBox.querySelectorAll('.ben');
+    for(var i=0;i<rows.length;i++){ var row=rows[i]; if(row.classList.contains('removed')) continue;
+      var f=row._fields; if(f.chk.checked && !f.name.value.trim()) return true; }
+    return false;
+  }
+
+  sel.addEventListener('change', function(){ showFormFor(sel.value); });
+  document.getElementById('addBenefit').addEventListener('click', function(){
+    benefitsBox.style.display='';
+    var r=makeRow({}, true, 'hard'); benefitsBox.appendChild(r); r._fields.name.focus();
+  });
+  // Tick-all / clear-all: flip every visible (non-removed, enabled) benefit checkbox at once.
+  function setAllChecks(val){
+    Array.prototype.forEach.call(benefitsBox.querySelectorAll('.ben'), function(row){
+      if(row.classList.contains('removed')) return;
+      var c=row._fields&&row._fields.chk;
+      if(c && !c.disabled) c.checked=val;
+    });
+  }
+  document.getElementById('selectAll').addEventListener('click', function(){ setAllChecks(true); });
+  document.getElementById('clearAll').addEventListener('click', function(){ setAllChecks(false); });
+
+  submitBtn.addEventListener('click', function(){
+    hideErr();
+    var card = EDIT ? EDIT.card : currentCardName();
+    if(!card){ showErr(UI.needCardName); return; }
+    var items=collectItems();
+    if(!items.length){ showErr(hasBlankCheckedRow()?UI.needName:UI.needOne); return; }
+    submitBtn.disabled=true; submitBtn.textContent=UI.saving;
+    var fail=function(err){
+      submitBtn.disabled=false; submitBtn.textContent=EDIT?UI.editSubmit:UI.submit;
+      showErr(String(err&&err.message||err));
+    };
+    if(EDIT){
+      google.script.run.withSuccessHandler(onSaved).withFailureHandler(fail).updateCard(card, items);
+    } else {
+      google.script.run.withSuccessHandler(function(r){ onAdded(r, card); }).withFailureHandler(fail).addBenefits(card, items);
+    }
+  });
+
+  function onAdded(res, card){
+    res=res||{added:0,skipped:0};
+    var msg = res.added ? fmt(UI.addedToDash,{card:card}) : UI.addedNone;
+    showBanner(msg);
+    submitBtn.disabled=false; submitBtn.textContent=UI.submit;
+    sel.value=''; showFormFor('');                 // back to the card picker — add another straight away
+  }
+  function onSaved(res){
+    res=res||{updated:[],added:[],removed:[]};
+    document.getElementById('erTitle').textContent='✓ '+UI.savedTitle;
+    var lines=document.getElementById('erLines'); lines.innerHTML='';
+    erLine(lines, UI.labelUpdated, res.updated);
+    erLine(lines, UI.labelAdded, res.added);
+    erLine(lines, UI.labelRemoved, res.removed);
+    LAST_CARD = res.card || null;
+    document.getElementById('form').style.display='none';
+    document.getElementById('editResult').style.display='';
+    window.scrollTo(0,0);
+  }
+  function erLine(box, label, names){
+    if(!names || !names.length) return;
+    var d=document.createElement('div'); d.className='er-line';
+    var l=document.createElement('span'); l.className='er-label'; l.textContent=label+':';
+    d.appendChild(l); d.appendChild(document.createTextNode(' '+names.join(', ')));
+    box.appendChild(d);
+  }
+  document.getElementById('erKeep').addEventListener('click', function(){
+    if(!LAST_CARD) return;
+    EDIT = LAST_CARD;
+    clearBenefits();
+    EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });
+    (EDIT.suggestions||[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });
+    document.getElementById('editResult').style.display='none';
+    document.getElementById('form').style.display='';
+    submitBtn.disabled=false; submitBtn.textContent=UI.editSubmit; hideErr();
+    window.scrollTo(0,0);
+  });
+  function showBanner(msg){
+    document.getElementById('bannerMsg').textContent=msg;
+    document.getElementById('banner').style.display='flex';
+    window.scrollTo(0,0);
+  }
+  document.getElementById('bannerClose').addEventListener('click', function(){
+    document.getElementById('banner').style.display='none';
+  });
+
+  // --- init ---
+  if(EDIT){
+    document.getElementById('title').textContent = UI.editTitle + ' · ' + EDIT.card;
+    var subEl=document.getElementById('sub'); subEl.textContent=UI.editSubtitle; subEl.style.display=UI.editSubtitle?'':'none';
+    document.getElementById('cardPicker').style.display='none';
+    hint.style.display='none';
+    benefitsBox.style.display=''; actions.style.display='';
+    document.getElementById('bulkBar').style.display='flex';
+    EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });        // current rows: checked, uncheck to remove (custom rows get a Delete button)
+    (EDIT.suggestions||[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); }); // catalog extras: tick to add
+    submitBtn.textContent = UI.editSubmit;
+  } else {
+    showFormFor('');  // just the card picker + hint
+  }
+</script>
+</body>
+</html>

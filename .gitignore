@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Node (verify.js has no deps, but just in case)
+node_modules/
+npm-debug.log*
+
+# Editor / OS cruft
+*.swp
+.idea/
+.vscode/

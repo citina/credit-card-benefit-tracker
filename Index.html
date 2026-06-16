@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#faf9f5;--surface:#fff;--text:#1a1a18;--muted:#6b6a64;--border:#e6e4dc;
+    --green-bg:#EAF3DE;--green-tx:#27500A;--amber-bg:#FAEEDA;--amber-tx:#633806;
+    --gray-bg:#F1EFE8;--gray-tx:#444441;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px}
+  .wrap{max-width:720px;margin:0 auto}
+  .head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  h1{font-size:22px;font-weight:500}
+  .addlink{font-size:14px;font-weight:500;color:#185FA5;text-decoration:none;white-space:nowrap}
+  .addlink:hover{text-decoration:underline}
+  .sub{font-size:14px;color:var(--muted);margin-bottom:24px}
+  .summary{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 18px;flex:1;min-width:120px}
+  .stat .n{font-size:24px;font-weight:500}
+  .stat .l{font-size:13px;color:var(--muted);margin-top:2px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  .card-name{font-size:16px;font-weight:500;margin-bottom:12px}
+  .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
+  .card-head .card-name{margin-bottom:0}
+  .kebab-wrap{position:relative;display:inline-flex}
+  button.kebab{font-size:18px;line-height:1;padding:2px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;background:none;color:var(--muted)}
+  button.kebab:hover{background:var(--bg);border-color:var(--border)}
+  .menu{position:absolute;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 14px rgba(26,26,24,.10);padding:4px;min-width:148px;z-index:10;display:none}
+  .menu.open{display:block}
+  .menu-item{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:8px 12px;border-radius:7px;cursor:pointer;border:none;background:none;color:var(--text);text-decoration:none}
+  .menu-item:hover{background:var(--bg)}
+  .menu-item.danger{color:#9a2218}
+  .menu-item:disabled{opacity:.5}
+  .menu-q{font-size:12.5px;color:var(--muted);padding:6px 12px 4px;line-height:1.35}
+  .ben{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--border)}
+  .ben:first-of-type{border-top:none}
+  .ben-info .name{font-size:15px}
+  .ben-info .name.done{text-decoration:line-through;color:var(--muted)}
+  .ben-info .meta{font-size:13px;color:var(--muted);margin-top:2px}
+  .ben-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .badge{padding:4px 10px;border-radius:99px;font-size:12px;font-weight:500}
+  .b-done{background:var(--green-bg);color:var(--green-tx)}
+  .b-pending{background:var(--amber-bg);color:var(--amber-tx)}
+  .b-snooze{background:var(--gray-bg);color:var(--gray-tx)}
+  .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .snooze-wrap{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .snooze-menu,.snooze-date-row{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+  button.mark{font-size:13px;padding:6px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text)}
+  button.mark:hover{background:var(--bg)}
+  button.mark:disabled{opacity:.5;cursor:default}
+  .loading{color:var(--muted);font-size:14px;padding:20px 0}
+  .sortbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:14px}
+  .sortlbl{font-size:13px;color:var(--muted)}
+  select.sortsel{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}
+  input.snooze-date{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1 id="title"></h1>
+    <a class="addlink" id="addlink" href="<?= addUrl ?>"></a>
+  </div>
+  <div class="sub" id="sub"></div>
+  <div class="summary" id="summary"></div>
+  <div class="sortbar" id="sortbar" style="display:none">
+    <label class="sortlbl" id="sortlbl" for="sortSel"></label>
+    <select class="sortsel" id="sortSel"></select>
+  </div>
+  <div id="cards"><div class="loading" id="loading"></div></div>
+</div>
+<script>
+  var DATA = <?!= dataJson ?>;
+  var UI = <?!= uiJson ?>;
+  var MISSING = "<?= missing ?>" === "1";
+  var ADD_URL = "<?= addUrl ?>";
+  var FN = { done:'markDone', undo:'undo', unsnooze:'unsnooze' };
+
+  document.getElementById('title').textContent = UI.title;
+  document.getElementById('sub').textContent = UI.subtitle;
+  document.getElementById('addlink').textContent = UI.addCards;
+  document.getElementById('loading').textContent = UI.loading;
+
+  // Sort control — reorders benefits *within* each card (grouping preserved). LAST caches the most
+  // recent server data so changing the sort key re-renders without a round-trip.
+  var SORT = 'expiry', LAST = DATA;
+  (function(){
+    var s = document.getElementById('sortSel'), labels = UI.sortLabels || {};
+    [['expiry',labels.expiry],['amount',labels.amount],['name',labels.name],['default',labels.default]]
+      .forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]||o[0]; s.appendChild(op); });
+    s.value = SORT;
+    document.getElementById('sortlbl').textContent = UI.sortBy;
+    s.addEventListener('change', function(){ SORT = s.value; render(LAST); });
+  })();
+  function pad2(n){ return (n<10?'0':'')+n; }
+  function tomorrowYmd(){ var d=new Date(); d.setDate(d.getDate()+1); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+  function amountNum(b){ var n=parseFloat(String(b.amount==null?'':b.amount).replace(/[^0-9.]/g,'')); return isFinite(n)?n:null; }
+  // Group by status first (still-to-use on top, done at the bottom of each card), then apply the
+  // chosen sort key within each group. 'default' keeps the original sheet order within the group.
+  function sortBenefits(list){
+    var pending=[], done=[];
+    list.forEach(function(b){ (b.done?done:pending).push(b); });
+    function ord(a){
+      if(SORT==='name'){ a.sort(function(x,y){ return String(x.benefit).localeCompare(String(y.benefit)); }); }
+      else if(SORT==='amount'){ a.sort(function(x,y){ var xa=amountNum(x),ya=amountNum(y); return (ya==null?-Infinity:ya)-(xa==null?-Infinity:xa); }); }  // biggest first; non-numeric last
+      else if(SORT==='expiry'){ a.sort(function(x,y){ var xd=(x.daysLeft==null?Infinity:x.daysLeft), yd=(y.daysLeft==null?Infinity:y.daysLeft); return xd-yd; }); }  // soonest first; 'once' last
+      return a;
+    }
+    return ord(pending).concat(ord(done));
+  }
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function fmtAmount(a){a=String(a==null?'':a);return /^\d+(\.\d+)?$/.test(a)?'$'+a:a}  // bare number → add $; leave "Unlimited"/"12 visits" alone
+  function stat(n,l){return '<div class="stat"><div class="n">'+n+'</div><div class="l">'+esc(l)+'</div></div>'}
+  function resetLabel(r){return (UI.resetLabels&&UI.resetLabels[r])||r}
+  function btn(action,id,label){return '<button class="mark" data-act="'+esc(action)+'" data-id="'+esc(id)+'">'+esc(label)+'</button>'}
+  // Snooze is two-step. Tap Snooze → a menu (Pick a date / Never / Cancel). Tap "Pick a date" →
+  // a date input + Confirm / Cancel. snoozeDate (the picked date) defers reminders until that day;
+  // Never (snoozeEnd) defers through period end. The <input> min/max are UX hints; server re-clamps.
+  function snoozeChips(b){
+    if(!b.snoozeOptions||!b.snoozeOptions.length)return '';   // expires too soon to snooze → no snooze UI
+    var id=b.id;
+    var maxAttr=b.snoozeMaxDate?(' max="'+esc(b.snoozeMaxDate)+'"'):'';
+    return '<span class="snooze-wrap">'+
+      '<button class="mark" data-act="snooze-open">'+esc(UI.snooze)+'</button>'+
+      '<span class="snooze-menu" style="display:none">'+
+        '<button class="mark chip" data-act="snooze-pick">'+esc(UI.snoozePick)+'</button>'+
+        '<button class="mark chip" data-act="snooze-end" data-id="'+esc(id)+'">'+esc(UI.snoozeNever)+'</button>'+
+        '<button class="mark chip" data-act="snooze-cancel">'+esc(UI.cancel)+'</button>'+
+      '</span>'+
+      '<span class="snooze-date-row" style="display:none">'+
+        '<input type="date" class="snooze-date" data-id="'+esc(id)+'" min="'+esc(tomorrowYmd())+'"'+maxAttr+' aria-label="'+esc(UI.snoozePickDate)+'" title="'+esc(UI.snoozePickDate)+'">'+
+        '<button class="mark chip" data-act="snooze-confirm">'+esc(UI.confirm)+'</button>'+
+        '<button class="mark chip" data-act="snooze-pick-cancel">'+esc(UI.cancel)+'</button>'+
+      '</span>'+
+    '</span>';
+  }
+  // Show exactly one of: the Snooze button ('closed') / the menu / the date row.
+  function snoozePhase(wrap, phase){
+    wrap.querySelector('[data-act="snooze-open"]').style.display = phase==='closed' ? '' : 'none';
+    wrap.querySelector('.snooze-menu').style.display = phase==='menu' ? 'inline-flex' : 'none';
+    wrap.querySelector('.snooze-date-row').style.display = phase==='date' ? 'inline-flex' : 'none';
+  }
+  // Card kebab (⋮) menu: actions collapsed until opened. Remove card asks once more before deleting.
+  // (Per-benefit removal now lives in the wizard's Edit card mode.)
+  function menuCard(card){
+    var href=ADD_URL+'&edit='+encodeURIComponent(card);
+    return '<span class="kebab-wrap">'+
+      '<button class="kebab" aria-label="'+esc(UI.menuLabel)+'">⋮</button>'+
+      '<div class="menu">'+
+        '<div class="menu-main">'+
+          '<a class="menu-item" target="_top" href="'+esc(href)+'">'+esc(UI.editCard)+'</a>'+
+          '<button class="menu-item danger" data-act="remove-card-open">'+esc(UI.removeCard)+'</button>'+
+        '</div>'+
+        '<div class="menu-confirm" style="display:none">'+
+          '<div class="menu-q">'+esc(UI.confirmRemoveCardQ)+'</div>'+
+          '<button class="menu-item danger" data-act="remove-card" data-card="'+esc(card)+'">'+esc(UI.confirmRemoveCard)+'</button>'+
+          '<button class="menu-item" data-act="remove-card-cancel">'+esc(UI.cancel)+'</button>'+
+        '</div>'+
+      '</div></span>';
+  }
+
+  function render(data){
+    LAST=data;
+    document.getElementById('sortbar').style.display = data.cards.length ? 'flex' : 'none';
+    var all=data.cards.reduce(function(a,c){return a.concat(c.benefits)},[]);
+    var done=all.filter(function(b){return b.done}).length;
+    var pending=all.filter(function(b){return !b.done}).length;  // snoozed still counts as to-use
+    document.getElementById('summary').innerHTML=
+      stat(all.length,UI.statTracked)+stat(pending,UI.statToUse)+stat(done,UI.statDone);
+    document.getElementById('cards').innerHTML=data.cards.map(function(c){
+      return '<div class="card"><div class="card-head"><div class="card-name">'+esc(c.card)+'</div>'+
+        menuCard(c.card)+'</div>'+
+        sortBenefits(c.benefits).map(function(b){
+          var badge=b.done?'<span class="badge b-done">'+esc(UI.badgeDone)+'</span>'
+            :b.snoozed?'<span class="badge b-snooze">'+esc(UI.badgeSnoozed)+'</span>'
+            :'<span class="badge b-pending">'+esc(UI.badgeToUse)+'</span>';
+          var acts;
+          if(b.done){acts=btn('undo',b.id,UI.undo)}
+          else if(b.snoozed){acts=btn('done',b.id,UI.markDone)+btn('unsnooze',b.id,UI.unsnooze)}
+          else{acts=btn('done',b.id,UI.markDone)+snoozeChips(b)}
+          var tail=b.expiryInfo?esc(b.expiryInfo):(b.refreshInfo?esc(b.refreshInfo):esc(b.category));  // pending → days-left+expiry; done → next refresh; else category
+          var meta=(b.snoozed&&b.snoozeInfo)
+            ? esc(b.snoozeInfo)
+            : esc(UI.resets)+' '+esc(resetLabel(b.reset))+' · '+tail;
+          return '<div class="ben"><div class="ben-info">'+
+            '<div class="name'+(b.done?' done':'')+'">'+esc(b.benefit)+(b.amount?(' — '+esc(fmtAmount(b.amount))):'')+'</div>'+
+            '<div class="meta">'+meta+'</div></div>'+
+            '<div class="ben-right">'+badge+'<span class="acts">'+acts+'</span></div></div>';
+        }).join('')+'</div>';
+    }).join('');
+  }
+
+  function closeMenus(){ var ms=document.querySelectorAll('.menu.open'); for(var i=0;i<ms.length;i++) ms[i].classList.remove('open'); }
+
+  document.getElementById('cards').addEventListener('click',function(e){
+    var el=e.target;
+    if(!el)return;
+    if(el.classList.contains('kebab')){          // ⋮ → toggle this card's menu (reset to main view)
+      var menu=el.parentNode.querySelector('.menu');
+      var open=menu.classList.contains('open');
+      closeMenus();
+      if(!open){
+        menu.classList.add('open');
+        var mc=menu.querySelector('.menu-confirm'); if(mc) mc.style.display='none';
+        var mm=menu.querySelector('.menu-main'); if(mm) mm.style.display='';
+      }
+      e.stopPropagation();
+      return;
+    }
+    if(!el.classList.contains('mark') && !el.classList.contains('menu-item')) return;
+    var action=el.getAttribute('data-act');
+    if(!action) return;                          // the Edit link (an <a>) just navigates
+    if(action==='snooze-open'){ snoozePhase(el.closest('.snooze-wrap'),'menu'); return; }          // → Pick a date / Never / Cancel
+    if(action==='snooze-cancel'){ snoozePhase(el.closest('.snooze-wrap'),'closed'); return; }      // menu → back to the Snooze button
+    if(action==='snooze-pick'){                   // menu → the date input + Confirm / Cancel
+      var wp=el.closest('.snooze-wrap'); snoozePhase(wp,'date');
+      var di=wp.querySelector('.snooze-date'); if(di) di.focus();
+      return;
+    }
+    if(action==='snooze-pick-cancel'){ snoozePhase(el.closest('.snooze-wrap'),'menu'); return; }   // date row → back to the menu
+    if(action==='snooze-confirm'){                // commit the picked date (server clamps to expiry)
+      var inp=el.closest('.snooze-wrap').querySelector('.snooze-date');
+      if(!inp||!inp.value){ if(inp) inp.focus(); return; }
+      el.disabled=true; el.textContent=UI.saving;
+      google.script.run
+        .withSuccessHandler(render)
+        .withFailureHandler(function(err){ el.disabled=false; el.textContent=UI.confirm; alert(String(err&&err.message||err)); })
+        .snoozeDate(inp.getAttribute('data-id'), inp.value);
+      return;
+    }
+    if(action==='remove-card-open'){             // reveal the confirm step inside the menu
+      var menu=el.closest('.menu');
+      menu.querySelector('.menu-main').style.display='none';
+      menu.querySelector('.menu-confirm').style.display='block';
+      return;
+    }
+    if(action==='remove-card-cancel'){
+      closeMenus();   // close the menu entirely; reopening resets to the main view
+      return;
+    }
+    var label=el.textContent;
+    el.disabled=true; el.textContent=UI.saving;
+    var run=google.script.run
+      .withSuccessHandler(render)
+      .withFailureHandler(function(err){el.disabled=false; el.textContent=label; alert(String(err&&err.message||err))});
+    if(action==='snooze-end'){ run.snoozeEnd(el.getAttribute('data-id')); }
+    else if(action==='remove-card'){ run.removeCard(el.getAttribute('data-card')); }
+    else{ run[FN[action]](el.getAttribute('data-id')); }
+  });
+  document.addEventListener('click',function(e){   // click outside a kebab → close menus
+    if(e.target.closest && e.target.closest('.kebab-wrap')) return;
+    closeMenus();
+  });
+
+  if(MISSING){
+    document.getElementById('cards').innerHTML=
+      '<div class="card"><div class="ben-info"><div class="meta">'+esc(UI.needSetup)+'</div></div></div>';
+  }else{
+    render(DATA);
+  }
+</script>
+</body>
+</html>
