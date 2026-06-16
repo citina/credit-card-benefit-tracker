@@ -29,19 +29,20 @@ console.log("dangling quoted t_ keys:", JSON.stringify(dangling));
 // 3) load Code.gs under GAS stubs and assert the pure logic
 const MM = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p2 = n => String(n).padStart(2, "0");
 function fmt(d, _t, f) { const Y = d.getUTCFullYear(), M = d.getUTCMonth() + 1, D = d.getUTCDate();
-  if (f === 'yyyy') return '' + Y; if (f === 'MM') return p2(M); if (f === 'yyyy-MM') return Y + '-' + p2(M);
+  if (f === 'yyyy') return '' + Y; if (f === 'MM') return p2(M); if (f === 'dd') return p2(D); if (f === 'yyyy-MM') return Y + '-' + p2(M);
   if (f === 'yyyy-MM-dd') return Y + '-' + p2(M) + '-' + p2(D); if (f === 'MMM d') return MM[M - 1] + ' ' + D;
   if (f === 'M月d日') return M + '月' + D + '日'; return Y + '-' + p2(M) + '-' + p2(D); }
-let currentSheet = null;
+let currentSheet = null, currentCards = null;
 const sb = {
   Session: { getScriptTimeZone: () => 'UTC', getEffectiveUser: () => ({ getEmail: () => 'o@x' }), getActiveUser: () => ({ getEmail: () => 'o@x' }) },
   Utilities: { formatDate: fmt },
-  SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (name) => name === 'Catalog' ? null : currentSheet }) },
+  SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (name) => name === 'Catalog' ? null : (name === 'Cards' ? currentCards : currentSheet) }) },
   LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
   console };
 vm.createContext(sb); vm.runInContext(code, sb);
 const SR = sb.shouldRemind_, PED = sb.periodEndDate_, DB = sb.daysBetween_, FSD = sb.fmtShortDate_, UC = sb.updateCard, GCR = sb.getCardRows_, U = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
 const PRD = sb.periodRefreshDate_, SUDN = sb.snoozeUntilDayNumber_, DN = sb.dayNumber_;
+const PA = sb.parseAmount_, AFPSY = sb.annualFeePeriodStartYear_, AFRD = sb.annualFeeResetDate_, RAD = sb.realizedAfterDone_, RAU = sb.realizedAfterUndo_;
 let pass = 0, fail = 0;
 const t = (n, g, e) => { if (JSON.stringify(g) === JSON.stringify(e)) pass++; else { fail++; console.log("  FAIL " + n + ": got " + JSON.stringify(g) + " exp " + JSON.stringify(e)); } };
 // reminders + expiry
@@ -63,6 +64,25 @@ t("snoozeEnd lands on period end", SUDN('snoozeEnd', 'monthly', U(2026, 6, 15)) 
 t("snoozeDate clamped past expiry", SUDN('snoozeDate', 'monthly', U(2026, 6, 15), '2026-07-20') - DN(U(2026, 6, 15)), 15); // → Jun30
 t("snoozeDate floored to tomorrow", SUDN('snoozeDate', 'monthly', U(2026, 6, 15), '2026-06-10') - DN(U(2026, 6, 15)), 1);  // past date → +1
 t("snooze too late → null", SUDN('snooze', 'monthly', U(2026, 6, 30), 3), null);                          // expires today
+// #2 annual-fee bar pure logic — parseAmount_ / period start-year / realized accumulator
+t("parseAmount $12.95", PA('$12.95'), 12.95);
+t("parseAmount $300", PA('$300'), 300);
+t("parseAmount $25", PA('$25'), 25);
+t("parseAmount bare 10", PA('10'), 10);
+t("parseAmount Unlimited", PA('Unlimited'), null);
+t("parseAmount 12 visits", PA('12 visits'), null);     // no $, not a bare number → not 12
+t("afYear after anniversary", AFPSY('2024-06-06', U(2026, 6, 16)), 2026);
+t("afYear on anniversary day", AFPSY('2024-06-16', U(2026, 6, 16)), 2026);   // d >= od is inclusive
+t("afYear before anniversary", AFPSY('2024-06-06', U(2026, 3, 1)), 2025);
+t("afYear blank → calendar", AFPSY('', U(2026, 8, 9)), 2026);
+t("feeReset next anniversary", FSD(AFRD('2024-06-06', U(2026, 6, 16))), "Jun 6");   // → 2027-06-06
+t("feeReset blank → Jan 1", FSD(AFRD('', U(2026, 6, 16))), "Jan 1");
+t("realized same period adds", RAD(60, 2026, 2026, '$10'), { value: 70, period: 2026 });
+t("realized cross period resets", RAD(60, 2025, 2026, '$10'), { value: 10, period: 2026 });  // stale base → just this amount
+t("realized Unlimited adds 0", RAD(60, 2026, 2026, 'Unlimited'), { value: 60, period: 2026 });
+t("undo same period subtracts", RAU(70, 2026, 2026, '$10'), 60);
+t("undo floors at 0", RAU(5, 2026, 2026, '$10'), 0);
+t("undo other period untouched", RAU(70, 2025, 2026, '$10'), 70);
 // updateCard diff + getCardRows suggestions (fake sheet)
 function makeSheet(rows) { var grid = rows.map(r => r.slice()); return {
   getLastRow: () => grid.length + 1,
