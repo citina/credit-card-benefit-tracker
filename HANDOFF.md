@@ -8,6 +8,27 @@
 
 _Snapshot: 2026-06-16. Repo is local-only (no git remote)._
 
+## 🐛 OPEN BUG — `/exec` web-app links show Google Drive "unable to open the file" (fix this first)
+
+**Symptom:** clicking any reminder-email link — Done, Snooze, AND "Open dashboard" (all share one `/exec` base) — shows Google's *"Sorry, unable to open the file at this time."* Drive page. As of last check even the bare `/exec` dashboard URL fails.
+
+**What we know (diagnosed 2026-06-16; clicked on desktop, browser signed into the owner account):**
+- Older test emails had **`/dev`**-ending links that **opened fine**; after a real deployment the links became **`/exec`** and now **all fail**. So `/dev` (head) works, `/exec` (versioned) is broken.
+- All three links share base `https://script.google.com/macros/s/<old-deployment-id>/exec`.
+- **`doGet` Executions log = "completed", no error** → server-side runs clean. This is a **serving / deployment-state problem, not a thrown exception or repo code bug** (`node verify.js` is green; nothing reproduces in code).
+- Ruled out: multi-account (desktop, owner account signed in), missing deployment (base resolves), and the `/dev` gotcha (it's `/dev` that *worked*).
+- The `Confirm` HTML file **exists but is named `Confirm.html`** in the editor — Apps Script references it as `'Confirm'`, so check/rename (though `doGet` completing suggests it resolves). `CONFIG.TOKEN` is still the default placeholder (it *matches* the link's token — not the cause).
+- All URLs are generated via `ScriptApp.getService().getUrl()` — Code.gs `:930` (email links), `:1000`/`:1012`/`:1037` (pages), `:1438` (htmlMessage_).
+
+**Leading hypothesis:** the `/exec` deployment `<old-deployment-id>` is in a broken state while the `/dev` head deployment still works.
+
+**Fix candidates (try in order — this is an environment/deployment issue; confirm before changing code):**
+1. Click a failing `/exec` link, then check **Executions** — does a *fresh* `doGet` execution appear? If **not**, the request dies at Google's serving layer (deployment is broken); if it appears and completes but the browser still errors, it's a serving/output issue.
+2. **Create a NEW deployment** (Deploy → New deployment → Web app → Execute as **Me** → access **Only myself**) → get a fresh `/exec` URL → test it. Recreating often fixes a corrupted `/exec`.
+3. Rename the HTML file `Confirm.html` → `Confirm` (no extension) if the editor literally shows `.html`.
+4. Re-authorize the script (run any function, accept the OAuth prompt) — a stale/expired authorization can make `/exec` fail.
+5. Once a working `/exec` exists, optionally **hardcode it into `CONFIG.WEBAPP_URL`** + add a `webAppUrl_()` helper (prefer the config value, fall back to `getService().getUrl()`) and use it at the 5 call sites — so email links from the trigger don't depend on `getService().getUrl()`. Then update SETUP.md + PITFALLS.md.
+
 ## What it is
 A credit-card recurring-benefit tracker on **Google Apps Script + Sheets + Gmail**, deployed as a private web app (**execute as me / access "Only myself"**). It solves one problem: *forgetting to use use-it-or-lose-it card credits before they expire.* Daily email reminder + a web dashboard + an in-app add/edit-cards wizard. Bilingual en/zh (`CONFIG.LANG`). Data lives in the owner's own Google Sheet; status is **derived, not stored** (a benefit is "done" when `LastDonePeriod == periodKey_`, so it auto-resets at period boundaries — no reset job).
 
