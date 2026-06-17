@@ -242,8 +242,8 @@ Mention iPhone use: links open in Safari fine; the dashboard can be added to the
 
 ## Add-cards wizard (built)
 
-Replaces hand-editing the `Benefits` sheet with an in-app flow. Original spec:
-`HANDOFF_add-cards-wizard.md`.
+Replaces hand-editing the `Benefits` sheet with an in-app flow. (Original build spec
+`HANDOFF_add-cards-wizard.md` was retired once built — see git history.)
 
 - **Catalog data ships in code** as the `CATALOG` constant (so every friend's copy gets it),
   researched/verified 2026-06: Chase Sapphire Preferred, Amex Gold, Amex Platinum, Chase Sapphire

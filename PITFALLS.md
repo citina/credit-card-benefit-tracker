@@ -1,0 +1,41 @@
+# 踩过的坑 / Pitfalls
+
+Non-obvious traps in this codebase. **Read before touching `Code.gs` or the sheets.** Each one cost real debugging time at least once.
+
+## Sheets & data
+
+1. **Period keys must be plain-text or Sheets eats them.** `LastDonePeriod` (e.g. `2026-06`), `RealizedPeriod`, `Anniversary` (`MM-DD`), and `RealizedSeedPeriod` are written **after `setNumberFormat('@')`**. Otherwise Sheets coerces `2026-06` / `06-06` into a **Date**, which then never matches `periodKey_()` on read → the benefit looks **un-done after reload**. (Annual `2026` survives by luck; monthly and MM-DD break.) `setup()` re-stamps these columns plain-text on every run.
+
+2. **`setup()` is idempotent — it does NOT reset an existing sheet.** `setupCards()` / `setupCatalog()` return early if the sheet already exists (to protect user edits). So a **stale sheet from earlier testing keeps old values.** This actually bit us: after renaming `OpenDate` → `Anniversary`, an old full-date open-date surfaced as a phantom **"Jan 20"** anniversary on Amex Platinum. **Fix: delete the `Cards` (or `Catalog`) tab and re-run `setup()`, or clear the offending cell.** Do this once before any real go-live if a test tab exists.
+
+3. **Adding a `Benefits` column means widening every write.** Reads/writes use `HEADERS.length`. When you add a column, update `COL`, `HEADERS`, `seedExamples_`, **and** the `newRows.push([...])` in both `addBenefits` and `updateCard` to the new width — or rows misalign. (New sheets default to 26 columns, so reads past the old width return blank instead of throwing — the bug hides.)
+
+## Time
+
+4. **All day/period math in the script timezone.** Use `Utilities.formatDate(..., Session.getScriptTimeZone())` + the `dayNumber_` helper, never raw `getTime()` UTC ms. **Set the Apps Script project time zone** (Project Settings) or period boundaries and the 9am send drift by a day around DST/midnight. Helper Dates are noon-anchored (`+12h`) so tz formatting never slips a day.
+
+## Security model
+
+5. **"Execute as me / Only myself" is the real guard — not the token.** Sharing the web-app link does **not** let others in; Google blocks any non-owner account. The app runs as the owner, so a visitor never touches the Sheet directly. **Sharing model = share the CODE; each person deploys their own private copy.** The `AUTHORIZED_EMAILS` allowlist is only enforceable on Google **Workspace**, not personal `@gmail` (the visitor's email isn't exposed when executing as the owner). `TOKEN` is defense-in-depth, never the boundary.
+
+6. **No side-effecting GET.** Email Done/Snooze links open a **confirm page that writes nothing**; the write happens via `google.script.run` on an explicit tap. If `doGet` ever mutates on its own, email link prefetchers / scanners will silently fire it.
+
+## Logic
+
+7. **Realized accumulation must be idempotent.** done/undo guard on the *actual* not-done→done transition (`isDone_` on the **old** `lastDonePeriod`, read before overwriting). Without the guard, re-tapping "done" double-counts the bar.
+
+8. **`parseAmount_` is deliberately strict.** Counts `$`-amounts and bare numbers only: `$12.95`→12.95, `10`→10, but `"12 visits"` must **NOT** become `12`, and `"Unlimited"`→null. It takes the **first** `$` in a multi-amount string (`"$5 + $10"`→5) — the catalog uses display totals (`$25`) to dodge this.
+
+9. **Anniversary basis is issuer-fixed, derived from `CATALOG` by name.** `benefitPeriodBasis_` matches card+benefit against the constant; a **renamed** benefit or a manual-add loses the `anniversary` flag and falls back to calendar. (Chosen over a stored column / per-benefit toggle — the issuer decides this, not the user.)
+
+10. **A calendar-annual benefit on a non-January card is inherently lumpy.** Its Jan-1 reset doesn't line up with the membership-year bar window, so it can be counted twice (or zero) in one window. **NOT fixable by setting the anniversary** — those benefits reset Jan 1 by issuer rule; only genuinely-anniversary benefits align. Accepted, not a bug.
+
+## Build / deploy
+
+11. **`verify.js` is not part of the app.** It's a local Node harness (GAS-stubbed). Don't paste it into the Apps Script editor. Run `node verify.js` (exit 0) before deploying.
+
+12. **Re-deploy a NEW version after any code change** (Manage deployments → Edit → New version), or the live dashboard + email links keep running old code.
+
+13. **STRINGS en/zh must stay symmetric.** `verify.js` checks that the key counts match; add every new string to **both** language blocks.
+
+14. **The 4 example seed rows are demo data.** `seedExamples_` seeds them on first setup (incl. a non-$ "Priority Pass / Unlimited") — replace with real cards via the wizard. The **`CATALOG` itself has only $ credits** (lounge / Global Entry / multipliers were deliberately excluded), so every real catalog card shows a progress bar.
