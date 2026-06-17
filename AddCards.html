@@ -353,6 +353,9 @@
     if(!card){ showErr(UI.needCardName); return; }
     var items=collectItems();
     if(!items.length){ showErr(hasBlankCheckedRow()?UI.needName:UI.needOne); return; }
+    // A card with an annual fee must have its anniversary set — the realized-value period and any
+    // anniversary-basis resets depend on it. No-fee / "Other" cards keep it optional.
+    if(Number(feeInput.value) > 0 && !getAnniversary()){ showErr(UI.needAnniversary); annMonth.focus(); return; }
     submitBtn.disabled=true; submitBtn.textContent=UI.saving;
     var fail=function(err){
       submitBtn.disabled=false; submitBtn.textContent=EDIT?UI.editSubmit:UI.submit;

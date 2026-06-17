@@ -130,14 +130,14 @@
   // 100% (shown in text); the fill width is clamped to 100%. If the card has no open date, a subtle
   // link nudges the user to set it (accumulation is on the calendar year until they do).
   function feeBar(c){
-    if(!c.showBar) return '';
+    var prompt=c.anniversaryMissing
+      ? '<div class="fee-prompt"><a target="_top" href="'+esc(ADD_URL+'&edit='+encodeURIComponent(c.card))+'">'+esc(UI.setAnniversary)+'</a></div>'
+      : '';
+    if(!c.showBar) return prompt ? '<div class="fee-bar">'+prompt+'</div>' : '';  // no bar — maybe just the nudge
     var fee=Number(c.annualFee)||0, real=Number(c.realized)||0;
     var pct=fee>0?Math.round(real/fee*100):0;
     var width=Math.max(0,Math.min(100,pct));
     var resets=c.feeResetInfo?(' · '+esc(c.feeResetInfo)):'';
-    var prompt=c.anniversaryMissing
-      ? '<div class="fee-prompt"><a target="_top" href="'+esc(ADD_URL+'&edit='+encodeURIComponent(c.card))+'">'+esc(UI.setAnniversary)+'</a></div>'
-      : '';
     return '<div class="fee-bar">'+
       '<div class="fee-track"><div class="fee-fill" style="width:'+width+'%"></div></div>'+
       '<div class="fee-text">'+esc(money(real))+' / '+esc(money(fee))+' · '+pct+'%'+resets+'</div>'+

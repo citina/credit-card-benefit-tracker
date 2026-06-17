@@ -193,6 +193,7 @@ const STRINGS = {
     addNeedCardName: 'Enter a card name first.',
     addNeedOne: 'Tick at least one benefit to add.',
     addNeedName: 'A ticked benefit has no name — fill it in or remove the row.',
+    addNeedAnniversary: 'Set the card anniversary (month + day) — this card has an annual fee.',
     benefitUnitOne: 'benefit',
     benefitUnitMany: 'benefits',
     addedSummary: 'Added {added} {unit} to your {card} card; skipped {skipped} already tracked.',
@@ -295,6 +296,7 @@ const STRINGS = {
     addNeedCardName: '请先填写卡片名称。',
     addNeedOne: '请至少勾选一项权益。',
     addNeedName: '有勾选的权益还没填名字 — 请填写或移除该行。',
+    addNeedAnniversary: '请先填写卡片周年日(月 + 日)—— 这张卡有年费。',
     benefitUnitOne: '项',
     benefitUnitMany: '项',
     addedSummary: '已添加 {added} {unit}到「{card}」,跳过 {skipped} 项(已在追踪中)。',
@@ -1322,7 +1324,7 @@ function buildDashboardData_() {
       cards[row.card] = {
         card: row.card, benefits: [],
         annualFee: meta.annualFee, anniversary: meta.anniversary,
-        afYear: afYear, realized: seed, hasParseable: false,
+        afYear: afYear, realized: seed, hasParseable: false, hasAnniversaryBenefit: false,
       };
       order.push(row.card);
     }
@@ -1331,6 +1333,7 @@ function buildDashboardData_() {
     // benefits count, and only when the stored value belongs to the current period (lazy reset:
     // a stale RealizedPeriod reads as 0 — no cron).
     if (parseAmount_(row.amount) != null) cardObj.hasParseable = true;
+    if (row.periodBasis === 'anniversary') cardObj.hasAnniversaryBenefit = true;
     if (String(row.realizedPeriod) === String(cardObj.afYear)) cardObj.realized += row.realizedValue;
     const done = isDone_(row, now);
     const snoozed = isSnoozed_(row, now);
@@ -1365,11 +1368,14 @@ function buildDashboardData_() {
     // (a card with no parseable amounts could never move off 0). When shown without an anniversary,
     // accumulation falls back to the calendar year and we flag it so the UI can nudge the user.
     const showBar = c.annualFee > 0 && c.hasParseable;
+    // Nudge to set the anniversary whenever it's missing AND it matters — the bar shows (its period
+    // would fall back to the calendar year) or the card has an anniversary-basis benefit (whose
+    // reset would be wrong). Independent of the bar so a no-fee anniversary card still gets nudged.
     return {
       card: c.card, benefits: c.benefits,
       annualFee: c.annualFee, realized: c.realized, showBar: showBar,
       feeResetInfo: showBar ? fmt_(t_('resetsOn'), { date: fmtShortDate_(annualFeeResetDate_(c.anniversary, now)) }) : '',
-      anniversaryMissing: showBar && !c.anniversary,
+      anniversaryMissing: !c.anniversary && (showBar || c.hasAnniversaryBenefit),
     };
   }) };
 }
@@ -1415,6 +1421,7 @@ function addUiStrings_() {
     addBenefit: t_('addAnotherBenefit'), submit: t_('addSubmit'), cancel: t_('confirmCancel'),
     selectAll: t_('addSelectAll'), clearAll: t_('addClearAll'),
     pickCardFirst: t_('addPickCardFirst'), needCardName: t_('addNeedCardName'), needOne: t_('addNeedOne'), needName: t_('addNeedName'),
+    needAnniversary: t_('addNeedAnniversary'),
     addedSummary: t_('addedSummary'), addedSummaryNoSkip: t_('addedSummaryNoSkip'), addedNone: t_('addedNone'),
     addedToDash: t_('addedToDash'), deleteBenefit: t_('deleteBenefit'),
     unitOne: t_('benefitUnitOne'), unitMany: t_('benefitUnitMany'),
