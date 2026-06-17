@@ -1,6 +1,6 @@
 # Project status — Credit Card Benefit Tracker
 
-_Snapshot: 2026-06-15._
+_Snapshot: 2026-06-16._
 
 ## State: deployed & working ✅
 Google Apps Script + Google Sheets + Gmail, deployed as a private web app
@@ -80,7 +80,14 @@ Share the **code**; each friend runs their **own private copy** (own Sheet + App
   (done-row resets, within-card sort with done pinned to the bottom, two-step snooze with date picker +
   "Skip this period", add-page select-all; partial-use deferred; cycle colors declined). Live backlog:
   annual-fee + realized-value bar, anniversary-year reset, partial-use, catalog freshness.
-- **Next build (annual fee + realized-value progress bar):** full self-contained brief in
-  `HANDOFF_annual-fee-progress.md` — realized value accumulates over the **annual-fee period**
-  (cardmember anniversary year from the open date), resets on the anniversary.
+- **Annual fee + realized-value progress bar — BUILT ✅** (merged to `main` 2026-06-16). Per-card
+  annual fee + a dashboard bar of realized value / fee; realized value accumulates over the
+  **cardmember anniversary year** (lazy reset, no cron), `$`-amounts only, plus a card-level manual
+  "already used this year" seed. **Anniversary-year resets also built** (backlog #3): `periodBasis`
+  derived from `CATALOG` (CSP Hotel, CSR Annual travel); card anniversary stored as `MM-DD`. New
+  `Cards` sheet (`Card | AnnualFee | Anniversary | RealizedSeed | RealizedSeedPeriod`) + two new
+  `Benefits` columns — **re-run `setup()`** on deploy (idempotent; delete a stale `Cards` tab first).
+  Briefs: `HANDOFF_annual-fee-progress.md`, `HANDOFF_followups.md` (#2/#3).
+- **Still backlog:** partial-use benefits, catalog freshness, and a "which card to use for this
+  purchase" reward optimizer (multipliers + targeted offers; good AI fit, separate concern).
 - **Local check:** `node verify.js` (parses Code.gs + HTML, runs logic under GAS stubs; 0 = green).

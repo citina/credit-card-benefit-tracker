@@ -74,7 +74,12 @@ you act; an in-app wizard adds/edits cards instead of hand-editing the sheet. Bi
    `updateCard unchanged not listed` / `unchanged kept` / `unchanged status preserved` asserts
    (verify.js now has 27 logic asserts total, after the feature build below).
 
-2. **[backlog] Annual fee + realized-value progress bar.** Per-card annual fee + a dashboard progress
+2. ~~**[backlog] Annual fee + realized-value progress bar.**~~ **BUILT — merged to `main` 2026-06-16.**
+   Realized value accumulates over the cardmember **anniversary year** (lazy reset, no cron);
+   `parseAmount_` counts $-amounts only; bar shows when `annualFee>0` AND the card has ≥1 parseable-$
+   benefit; a card-level **manual realized-seed** lets people who start mid-year set a baseline.
+   `HANDOFF_annual-fee-progress.md` is the build brief. Original plan below for reference:
+   Per-card annual fee + a dashboard progress
    bar of realized value / fee. **Approach agreed 2026-06-16:**
    - **Annual fee** → a new editable `Cards` sheet (`Card | AnnualFee | OpenMonth`), seeded from a
      per-card catalog default (add `annualFee` to `CATALOG`). `OpenMonth` is also reusable for the
@@ -92,7 +97,13 @@ you act; an in-app wizard adds/edits cards instead of hand-editing the sheet. Bi
      `parseAmount_` / `annualFeePeriodStartYear_` / `realizedAfterDone_`, UI, verify asserts, open
      questions). Not yet built — its own session.
 
-3. **[backlog] Anniversary-year vs calendar-year reset (real correctness issue).** Period math treats
+3. ~~**[backlog] Anniversary-year vs calendar-year reset.**~~ **BUILT — merged to `main` 2026-06-16.**
+   `periodBasis` is derived from `CATALOG` by name (`benefitPeriodBasis_`; no stored column, no
+   per-benefit UI — issuer-fixed). CSP Hotel $100 + CSR Annual travel $300 are flagged `anniversary`;
+   their period (key/start/end/refresh) + reminders/expiry/snooze now roll on the card anniversary.
+   Card anniversary stored as `MM-DD` (month/day only). Blank anniversary → calendar fallback.
+   Original analysis below for reference:
+   Period math treats
    every `annual` as a **calendar** year, but some Chase credits reset on the **cardmember anniversary
    year** — so for a non-January open date both the reset/expiry date AND the realized-value year (#2)
    come out wrong. **Which benefits (verified 2026-06 against Chase):**
