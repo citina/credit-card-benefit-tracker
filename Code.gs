@@ -181,7 +181,9 @@ const STRINGS = {
     addCardPlaceholder: 'Choose a card…',
     addCardOther: 'Other (type a name)',
     addCardNamePlaceholder: 'Card name',
-    addVerified: 'Benefits as of {date}. Verify current terms with your issuer.',
+    addVerified: 'Benefits verified as of {date}. Verify current terms with your issuer.',
+    addSource: 'Source',
+    addReviewRecommended: 'Review recommended',
     addColBenefit: 'Benefit',
     addColAmount: 'Amount',
     addColCategory: 'Category',
@@ -280,7 +282,9 @@ const STRINGS = {
     addCardPlaceholder: '选择一张卡…',
     addCardOther: '其他(手动输入)',
     addCardNamePlaceholder: '卡片名称',
-    addVerified: '权益数据截至 {date}。请以发卡机构最新条款为准。',
+    addVerified: '权益数据核实于 {date}。请以发卡机构最新条款为准。',
+    addSource: '来源',
+    addReviewRecommended: '建议复核',
     addColBenefit: '权益',
     addColAmount: '金额',
     addColCategory: '类别',
@@ -932,10 +936,16 @@ function getCardRows_(card) {
   });
   const cardName = rows.length ? rows[0].card : card;
   const m = getCardMeta_(cardName);
-  const afYear = annualFeePeriodStartYear_(m.anniversary, new Date());
+  const now = new Date();
+  const afYear = annualFeePeriodStartYear_(m.anniversary, now);
   const effSeed = (String(m.realizedSeedPeriod) === String(afYear)) ? m.realizedSeed : 0;
+  // Catalog freshness for this card, surfaced in the edit form (same note as add mode).
+  const fresh = cat
+    ? { lastVerified: cat.lastVerified, sourceUrl: cat.sourceUrl, stale: catalogStale_(cat.lastVerified, now) }
+    : { lastVerified: '', sourceUrl: '', stale: false };
   return {
     card: cardName,
+    freshness: fresh,
     benefits: rows.map(function (r) {
       return { id: r.id, benefit: r.benefit, amount: r.amount, category: validCategory_(r.category),
                reset: r.reset, reminderDays: r.reminderDays,
@@ -1151,7 +1161,10 @@ function dashboardPage_() {
 
 function addCardsPage_(params) {
   const tpl = HtmlService.createTemplateFromFile('AddCards');
-  tpl.catalogJson = jsonForHtml_(getCatalogData_());
+  const cat = getCatalogData_();
+  const now = new Date();
+  cat.cards.forEach(function (c) { c.stale = catalogStale_(c.lastVerified, now); });  // wizard freshness warning
+  tpl.catalogJson = jsonForHtml_(cat);
   tpl.uiJson = jsonForHtml_(addUiStrings_());
   tpl.metaJson = jsonForHtml_(getCardMetaMap_());  // {cardKey: {annualFee, openDate}} — add-mode fee prefill
   tpl.dashUrl = webAppUrl_();
@@ -1568,7 +1581,7 @@ function addUiStrings_() {
     labelRemoved: t_('editLabelRemoved'), keepEditing: t_('editKeepEditing'),
     cardLabel: t_('addCardLabel'), cardPlaceholder: t_('addCardPlaceholder'),
     cardOther: t_('addCardOther'), cardNamePlaceholder: t_('addCardNamePlaceholder'),
-    verified: t_('addVerified'),
+    verified: t_('addVerified'), source: t_('addSource'), reviewRecommended: t_('addReviewRecommended'),
     colBenefit: t_('addColBenefit'), colAmount: t_('addColAmount'),
     colCategory: t_('addColCategory'), colReset: t_('addColReset'),
     benefitNamePlaceholder: t_('addBenefitNamePlaceholder'), amountPlaceholder: t_('addAmountPlaceholder'),

@@ -6,7 +6,7 @@
 <style>
   :root{
     --bg:#faf9f5;--surface:#fff;--text:#1a1a18;--muted:#6b6a64;--border:#e6e4dc;
-    --green:#0F6E56;--blue:#185FA5;--err:#9a2218;
+    --green:#0F6E56;--blue:#185FA5;--err:#9a2218;--warn:#8a6d00;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px}
@@ -25,6 +25,9 @@
   .ann-row select{flex:1;min-width:0}
   #cardOther{margin-top:10px}
   .verified{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.45}
+  .verified a{color:var(--blue);text-decoration:none}
+  .verified a:hover{text-decoration:underline}
+  .stale-flag{color:var(--warn);font-weight:500}
   .hint{color:var(--muted);font-size:14px;padding:2px 2px 10px}
   #bulkBar{display:none;gap:8px;margin-bottom:12px}
   /* benefit rows */
@@ -83,8 +86,9 @@
       <label class="lbl" id="cardLbl" for="cardSel"></label>
       <select class="sel" id="cardSel"></select>
       <input class="txt" id="cardOther" type="text" style="display:none">
-      <div class="verified" id="verified" style="display:none"></div>
     </div>
+    <!-- Freshness line — sibling of cardPicker so it shows in edit mode too (cardPicker is hidden there). -->
+    <div class="verified" id="verified" style="display:none;margin:-6px 2px 16px"></div>
 
     <div class="card" id="metaCard" style="display:none">
       <div class="meta-row">
@@ -143,6 +147,18 @@
 
   function fmt(s,obj){ return String(s).replace(/\{(\w+)\}/g,function(m,k){ return obj&&obj[k]!=null?obj[k]:m; }); }
   function opt(value,label){ var o=document.createElement('option'); o.value=value; o.textContent=label; return o; }
+  function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(ch){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
+  function safeUrl(u){ u=String(u==null?'':u).trim(); return /^https?:\/\//i.test(u)?u:''; }
+  // Freshness line for a catalog card {lastVerified, sourceUrl, stale}: "verified as of …" + an
+  // optional Source link + an optional "Review recommended" flag. URL scheme-checked + HTML-escaped.
+  function renderFreshness(c){
+    var su = c ? safeUrl(c.sourceUrl) : '';
+    if(!c || (!c.lastVerified && !su && !c.stale)){ verified.style.display='none'; return; }
+    var html = c.lastVerified ? escHtml(fmt(UI.verified,{date:c.lastVerified})) : '';
+    if(su) html += (html?' · ':'') + '<a href="'+escHtml(su)+'" target="_blank" rel="noopener noreferrer">'+escHtml(UI.source)+' ↗</a>';
+    if(c.stale) html += (html?' · ':'') + '<span class="stale-flag">'+escHtml(UI.reviewRecommended)+'</span>';
+    verified.innerHTML = html; verified.style.display='';
+  }
 
   // --- static text ---
   document.getElementById('title').textContent = UI.title;
@@ -301,8 +317,7 @@
     } else {
       cardOther.style.display='none';
       var c=CARDS[value];
-      if(c && c.lastVerified){ verified.textContent=fmt(UI.verified,{date:c.lastVerified}); verified.style.display=''; }
-      else { verified.style.display='none'; }
+      renderFreshness(c);   // verified-as-of + optional Source link + Review-recommended flag
       showMeta(META[cardKey(value)], false);   // prefill the seeded annual-fee default (no seed in add mode)
       (c?c.benefits:[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });  // opt-in: tick to add, no ×
     }
@@ -417,6 +432,7 @@
     if(!LAST_CARD) return;
     EDIT = LAST_CARD;
     showMeta(EDIT.meta, true);   // re-prefill from the refreshed card state
+    renderFreshness(EDIT.freshness);
     clearBenefits();
     EDIT.benefits.forEach(function(b){ benefitsBox.appendChild(makeRow(b, true, 'none')); });
     (EDIT.suggestions||[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });
@@ -440,6 +456,7 @@
     var subEl=document.getElementById('sub'); subEl.textContent=UI.editSubtitle; subEl.style.display=UI.editSubtitle?'':'none';
     document.getElementById('cardPicker').style.display='none';
     hint.style.display='none';
+    renderFreshness(EDIT.freshness);
     showMeta(EDIT.meta, true);   // prefill the card's saved annual fee + anniversary + seed
     benefitsBox.style.display=''; actions.style.display='';
     document.getElementById('bulkBar').style.display='flex';
