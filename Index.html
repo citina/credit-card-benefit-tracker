@@ -12,15 +12,10 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px}
   .wrap{max-width:720px;margin:0 auto}
-  .head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  .head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:20px}
   h1{font-size:22px;font-weight:500}
   .addlink{font-size:14px;font-weight:500;color:#185FA5;text-decoration:none;white-space:nowrap}
   .addlink:hover{text-decoration:underline}
-  .sub{font-size:14px;color:var(--muted);margin-bottom:24px}
-  .summary{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-  .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 18px;flex:1;min-width:120px}
-  .stat .n{font-size:24px;font-weight:500}
-  .stat .l{font-size:13px;color:var(--muted);margin-top:2px}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
   .card-name{font-size:16px;font-weight:500;margin-bottom:12px}
   .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
@@ -72,8 +67,6 @@
     <h1 id="title"></h1>
     <a class="addlink" id="addlink" href="<?= addUrl ?>"></a>
   </div>
-  <div class="sub" id="sub"></div>
-  <div class="summary" id="summary"></div>
   <div class="sortbar" id="sortbar" style="display:none">
     <label class="sortlbl" id="sortlbl" for="sortSel"></label>
     <select class="sortsel" id="sortSel"></select>
@@ -88,7 +81,6 @@
   var FN = { done:'markDone', undo:'undo', unsnooze:'unsnooze' };
 
   document.getElementById('title').textContent = UI.title;
-  document.getElementById('sub').textContent = UI.subtitle;
   document.getElementById('addlink').textContent = UI.addCards;
   document.getElementById('loading').textContent = UI.loading;
 
@@ -122,7 +114,6 @@
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
   function fmtAmount(a){a=String(a==null?'':a);return /^\d+(\.\d+)?$/.test(a)?'$'+a:a}  // bare number → add $; leave "Unlimited"/"12 visits" alone
-  function stat(n,l){return '<div class="stat"><div class="n">'+n+'</div><div class="l">'+esc(l)+'</div></div>'}
   function resetLabel(r){return (UI.resetLabels&&UI.resetLabels[r])||r}
   function btn(action,id,label){return '<button class="mark" data-act="'+esc(action)+'" data-id="'+esc(id)+'">'+esc(label)+'</button>'}
   function money(n){ n=Math.round((Number(n)||0)*100)/100; return '$'+(n%1===0?n:n.toFixed(2)); }
@@ -192,11 +183,6 @@
   function render(data){
     LAST=data;
     document.getElementById('sortbar').style.display = data.cards.length ? 'flex' : 'none';
-    var all=data.cards.reduce(function(a,c){return a.concat(c.benefits)},[]);
-    var done=all.filter(function(b){return b.done}).length;
-    var pending=all.filter(function(b){return !b.done}).length;  // snoozed still counts as to-use
-    document.getElementById('summary').innerHTML=
-      stat(all.length,UI.statTracked)+stat(pending,UI.statToUse)+stat(done,UI.statDone);
     document.getElementById('cards').innerHTML=data.cards.map(function(c){
       return '<div class="card"><div class="card-head"><div class="card-name">'+esc(c.card)+'</div>'+
         menuCard(c.card)+'</div>'+

@@ -6,35 +6,24 @@
 - **`PITFALLS.md`** — non-obvious traps (踩过的坑). **Read before changing the engine.**
 - **`Code.gs` / `Index.html` / `Confirm.html` / `AddCards.html`** — the app. **`verify.js`** — local test harness (NOT deployed).
 
-_Snapshot: 2026-06-16. Repo is local-only (no git remote)._
+_Snapshot: 2026-06-17. Repo is local-only (no git remote)._
 
-## 🐛 OPEN BUG — `/exec` web-app links show Google Drive "unable to open the file" (fix this first)
+## ✅ FIXED 2026-06-17 — `/exec` web-app links showed Google Drive "unable to open the file"
 
-**Symptom:** clicking any reminder-email link — Done, Snooze, AND "Open dashboard" (all share one `/exec` base) — shows Google's *"Sorry, unable to open the file at this time."* Drive page. As of last check even the bare `/exec` dashboard URL fails.
+**Was:** every reminder-email link (Done / Snooze / Open dashboard) **and** the bare `/exec` dashboard showed Google's *"Sorry, unable to open the file at this time."*
 
-**What we know (diagnosed 2026-06-16; clicked on desktop, browser signed into the owner account):**
-- Older test emails had **`/dev`**-ending links that **opened fine**; after a real deployment the links became **`/exec`** and now **all fail**. So `/dev` (head) works, `/exec` (versioned) is broken.
-- All three links share base `https://script.google.com/macros/s/<old-deployment-id>/exec`.
-- **`doGet` Executions log = "completed", no error** → server-side runs clean. This is a **serving / deployment-state problem, not a thrown exception or repo code bug** (`node verify.js` is green; nothing reproduces in code).
-- Ruled out: multi-account (desktop, owner account signed in), missing deployment (base resolves), and the `/dev` gotcha (it's `/dev` that *worked*).
-- The `Confirm` HTML file **exists but is named `Confirm.html`** in the editor — Apps Script references it as `'Confirm'`, so check/rename (though `doGet` completing suggests it resolves). `CONFIG.TOKEN` is still the default placeholder (it *matches* the link's token — not the cause).
-- All URLs are generated via `ScriptApp.getService().getUrl()` — Code.gs `:930` (email links), `:1000`/`:1012`/`:1037` (pages), `:1438` (htmlMessage_).
+**Root cause:** the versioned `/exec` deployment (`<old-deployment-id>`) was in a **corrupted serving state** — `doGet` ran and logged "completed", but Google's output/redirect layer failed to serve it. Not a repo code bug (`/dev` head worked; `verify.js` green). Confirmed by: clicking `/exec` produced a *fresh, completed* `doGet` execution (request reached the server) yet the browser still errored, and it failed in **incognito** too (ruled out browser session / multi-account).
 
-**Leading hypothesis:** the `/exec` deployment `<old-deployment-id>` is in a broken state while the `/dev` head deployment still works.
+**Fix:** **created a NEW deployment** (Deploy → New deployment → Web app → Execute as **Me** / **Only myself**) → fresh URL `<new-deployment-id>/exec` opened cleanly. Then **pinned that URL into `CONFIG.WEBAPP_URL`** and routed all 5 URL call sites through a new `webAppUrl_()` helper (`CONFIG.WEBAPP_URL || ScriptApp.getService().getUrl()`), so trigger-generated email links no longer depend on `getService().getUrl()` (which can resolve to a stale/broken deployment). See PITFALLS #15.
 
-**Fix candidates (try in order — this is an environment/deployment issue; confirm before changing code):**
-1. Click a failing `/exec` link, then check **Executions** — does a *fresh* `doGet` execution appear? If **not**, the request dies at Google's serving layer (deployment is broken); if it appears and completes but the browser still errors, it's a serving/output issue.
-2. **Create a NEW deployment** (Deploy → New deployment → Web app → Execute as **Me** → access **Only myself**) → get a fresh `/exec` URL → test it. Recreating often fixes a corrupted `/exec`.
-3. Rename the HTML file `Confirm.html` → `Confirm` (no extension) if the editor literally shows `.html`.
-4. Re-authorize the script (run any function, accept the OAuth prompt) — a stale/expired authorization can make `/exec` fail.
-5. Once a working `/exec` exists, optionally **hardcode it into `CONFIG.WEBAPP_URL`** + add a `webAppUrl_()` helper (prefer the config value, fall back to `getService().getUrl()`) and use it at the 5 call sites — so email links from the trigger don't depend on `getService().getUrl()`. Then update SETUP.md + PITFALLS.md.
+**⚠️ Maintenance:** if you ever **create another new deployment** (new `AKfycb…/exec` URL), you **must** update `CONFIG.WEBAPP_URL` to match, or email links point at the old one. Editing the *existing* deployment to a **New version** keeps the URL — that's the normal path.
 
 ## What it is
 A credit-card recurring-benefit tracker on **Google Apps Script + Sheets + Gmail**, deployed as a private web app (**execute as me / access "Only myself"**). It solves one problem: *forgetting to use use-it-or-lose-it card credits before they expire.* Daily email reminder + a web dashboard + an in-app add/edit-cards wizard. Bilingual en/zh (`CONFIG.LANG`). Data lives in the owner's own Google Sheet; status is **derived, not stored** (a benefit is "done" when `LastDonePeriod == periodKey_`, so it auto-resets at period boundaries — no reset job).
 
 ## Current state — built & working ✅
-- **Daily reminder** (`sendReminders`, 9am local): period-driven (start-of-period + near-expiry nudges). Email Done/Snooze links open a **confirm page** (no silent GET writes).
-- **Dashboard** (`Index.html`): benefits grouped by card; Mark done / Snooze (two-step: pick a date / skip this period) / Undo / Un-snooze; within-card sort, done pinned to the bottom; days-left + expiry or "resets &lt;date&gt;". ⋮ menu per card (Edit / Remove).
+- **Daily reminder** (`sendReminders`, 9am local): period-driven (start-of-period + near-expiry nudges). Email Done/Snooze links open a **confirm page** (no silent GET writes). Each row shows the `$` amount (via `displayAmount_`, which `$`-prefixes bare numbers) and `Nd left · expires <date>`.
+- **Dashboard** (`Index.html`): benefits grouped by card; Mark done / Snooze (two-step: pick a date / skip this period) / Undo / Un-snooze; within-card sort, done pinned to the bottom; days-left + expiry or "resets &lt;date&gt;". ⋮ menu per card (Edit / Remove). (No top summary-stats panel or subtitle — removed 2026-06-17 to declutter.)
 - **Add/Edit cards wizard** (`AddCards.html`): pick a card → its catalog benefits (opt-in, unchecked) → tick/edit/add → write (auth + lock + dedup). Edit updates in place (preserves done/snooze); remove by unchecking.
 - **Annual-fee value bar** (per card): realized value / annual fee, accumulated over the **cardmember anniversary year**, lazy reset (no cron). `$`-amounts only (`parseAmount_`). Shows when `fee>0` AND the card has ≥1 parseable-$ benefit. Card-level **manual seed** ("already used this year $") for people who start mid-year.
 - **Anniversary-year resets**: benefits flagged `anniversary` in `CATALOG` (CSP **Hotel $100**, CSR **Annual travel $300**) reset on the card anniversary, not Jan 1 — affects done-status, reminders, expiry, snooze. Basis is **derived from CATALOG by name** (no per-benefit UI). Card **anniversary** is MM-DD (month/day, no year); **required when the card has a fee**.

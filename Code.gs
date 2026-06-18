@@ -9,6 +9,10 @@ const CONFIG = {
   LANG: 'en',                                     // 'en' | 'zh'
   AUTHORIZED_EMAILS: [],                          // empty = owner-only. Only meaningful in "Anyone" access (Workspace).
   TOKEN: 'CHANGE_ME_to_a_long_random_string',    // defense-in-depth; required only in "Anyone" sharing mode
+  // The deployed web-app /exec URL. Pin it here so email links (built from a trigger context)
+  // don't depend on ScriptApp.getService().getUrl(), which can resolve to a stale/broken
+  // deployment. Leave '' to fall back to getService().getUrl(). Update after a NEW deployment.
+  WEBAPP_URL: '',
   DEFAULT_REMINDER_DAYS: 4,
   SNOOZE_DEFAULT_DAYS: 3,
   DAILY_HOUR: 9,                                  // 24h, script timezone
@@ -118,10 +122,6 @@ const STRINGS = {
     emailSnooze: 'Snooze {d}d',
     openDashboard: 'Open the full dashboard →',
     dashTitle: 'Card benefit tracker',
-    dashSubtitle: 'Live status from your sheet. Reminders arrive by email automatically.',
-    statTracked: 'benefits tracked',
-    statToUse: 'still to use',
-    statDone: 'done',
     badgeDone: 'Done',
     badgeToUse: 'To use',
     badgeSnoozed: 'Snoozed',
@@ -170,7 +170,6 @@ const STRINGS = {
     // Add-cards wizard
     addCards: '+ Add cards',
     addTitle: 'Add cards',
-    addSubtitle: 'Pick a card to see its known benefits, tick the ones you have, then add them.',
     addCardLabel: 'Card',
     addCardPlaceholder: 'Choose a card…',
     addCardOther: 'Other (type a name)',
@@ -221,10 +220,6 @@ const STRINGS = {
     emailSnooze: '推迟{d}天',
     openDashboard: '打开完整面板 →',
     dashTitle: '信用卡权益追踪',
-    dashSubtitle: '数据实时来自你的表格,提醒会自动发送到邮箱。',
-    statTracked: '追踪权益',
-    statToUse: '待使用',
-    statDone: '已使用',
     badgeDone: '已使用',
     badgeToUse: '待使用',
     badgeSnoozed: '已推迟',
@@ -273,7 +268,6 @@ const STRINGS = {
     // Add-cards wizard
     addCards: '+ 添加卡片',
     addTitle: '添加卡片',
-    addSubtitle: '选择一张卡查看它的已知权益,勾选你拥有的,然后添加。',
     addCardLabel: '卡片',
     addCardPlaceholder: '选择一张卡…',
     addCardOther: '其他(手动输入)',
@@ -572,6 +566,15 @@ function parseAmount_(s) {
   if (dollar) return Number(dollar[1]);
   if (/^\d+(?:\.\d+)?$/.test(str)) return Number(str);
   return null;
+}
+
+// Display form of an amount: prefix '$' to a bare dollar number (sheet rows sometimes store
+// "300" instead of "$300"). Anything already containing '$', or non-$ text (e.g. 'Priority
+// Pass', '12 visits'), is returned untouched — never double-prefixed, never coerced.
+function displayAmount_(s) {
+  const str = String(s == null ? '' : s).trim();
+  if (str && str.indexOf('$') === -1 && /^\d+(?:\.\d+)?$/.test(str)) return '$' + str;
+  return str;
 }
 
 // Month/day of an anniversary → {om, od}. Accepts 'MM-DD' (the stored form), bare 'M-D', and a
@@ -927,7 +930,8 @@ function sendReminders() {
 }
 
 function reminderHtml_(due) {
-  const url = ScriptApp.getService().getUrl();
+  const url = webAppUrl_();
+  const now = new Date();
   const heading = due.length === 1
     ? t_('emailHeadingOne')
     : fmt_(t_('emailHeadingMany'), { n: due.length });
@@ -938,12 +942,17 @@ function reminderHtml_(due) {
   due.forEach(function (row) {
     const doneUrl = actionUrl_(url, 'done', row.id, '');
     const snoozeUrl = actionUrl_(url, 'snooze', row.id, '&days=' + CONFIG.SNOOZE_DEFAULT_DAYS);
+    const endNum = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);  // null = no expiry ('once')
+    const daysLeft = (endNum === null) ? null : endNum - dayNumber_(now);
+    const expiry = (endNum === null) ? '' : (daysLeft <= 0 ? t_('expiryToday')
+      : fmt_(t_('expiryInfo'), { n: daysLeft, date: fmtShortDate_(periodEndDate_(row.reset, now, row.periodBasis, row.anniversary)) }));
     html +=
       '<tr style="border-bottom:1px solid #e6e4dc">' +
         '<td style="padding:12px 8px 12px 0;vertical-align:top">' +
-          '<div style="font-size:15px;color:#1a1a18">' + esc_(row.benefit) + ' — ' + esc_(row.amount) + '</div>' +
+          '<div style="font-size:15px;color:#1a1a18">' + esc_(row.benefit) + ' — ' + esc_(displayAmount_(row.amount)) + '</div>' +
           '<div style="font-size:13px;color:#6b6a64">' + esc_(row.card) + ' · ' +
-            esc_(t_('resets')) + ' ' + esc_(resetLabel_(row.reset)) + '</div>' +
+            esc_(t_('resets')) + ' ' + esc_(resetLabel_(row.reset)) +
+            (expiry ? ' · ' + esc_(expiry) : '') + '</div>' +
         '</td>' +
         '<td style="padding:12px 0;text-align:right;white-space:nowrap;vertical-align:top">' +
           '<a href="' + doneUrl + '" style="display:inline-block;padding:7px 14px;background:#0F6E56;color:#fff;border-radius:6px;text-decoration:none;font-size:13px">' +
@@ -957,6 +966,12 @@ function reminderHtml_(due) {
   html += '<p style="margin-top:20px"><a href="' + url + '" style="color:#185FA5">' +
     esc_(t_('openDashboard')) + '</a></p></div>';
   return html;
+}
+
+// Prefer the pinned CONFIG.WEBAPP_URL (deterministic across trigger/editor/web contexts);
+// fall back to the active deployment's URL when it's not set.
+function webAppUrl_() {
+  return CONFIG.WEBAPP_URL || ScriptApp.getService().getUrl();
 }
 
 function actionUrl_(url, action, id, extra) {
@@ -997,7 +1012,7 @@ function dashboardPage_() {
   tpl.missing = data.missing ? '1' : '';
   tpl.dataJson = jsonForHtml_(data.missing ? { cards: [] } : buildDashboardData_());
   tpl.uiJson = jsonForHtml_(uiStrings_());
-  tpl.addUrl = ScriptApp.getService().getUrl() + '?view=add';
+  tpl.addUrl = webAppUrl_() + '?view=add';
   return tpl.evaluate()
     .setTitle(t_('dashTitle'))
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -1009,7 +1024,7 @@ function addCardsPage_(params) {
   tpl.catalogJson = jsonForHtml_(getCatalogData_());
   tpl.uiJson = jsonForHtml_(addUiStrings_());
   tpl.metaJson = jsonForHtml_(getCardMetaMap_());  // {cardKey: {annualFee, openDate}} — add-mode fee prefill
-  tpl.dashUrl = ScriptApp.getService().getUrl();
+  tpl.dashUrl = webAppUrl_();
   const editCard = (params && params.edit) ? String(params.edit) : '';
   tpl.editJson = jsonForHtml_(editCard ? getCardRows_(editCard) : null);
   return tpl.evaluate()
@@ -1034,7 +1049,7 @@ function confirmPage_(action, params) {
 
   const tpl = HtmlService.createTemplateFromFile('Confirm');
   tpl.question = question;
-  tpl.dashUrl = ScriptApp.getService().getUrl();
+  tpl.dashUrl = webAppUrl_();
   tpl.ctxJson = jsonForHtml_({
     action: action, id: row.id, days: days, token: CONFIG.TOKEN || '',
     confirmLabel: t_('confirmYes'), cancelLabel: t_('confirmCancel'), openDash: t_('openDash'),
@@ -1382,8 +1397,7 @@ function buildDashboardData_() {
 
 function uiStrings_() {
   return {
-    title: t_('dashTitle'), subtitle: t_('dashSubtitle'), addCards: t_('addCards'),
-    statTracked: t_('statTracked'), statToUse: t_('statToUse'), statDone: t_('statDone'),
+    title: t_('dashTitle'), addCards: t_('addCards'),
     badgeDone: t_('badgeDone'), badgeToUse: t_('badgeToUse'), badgeSnoozed: t_('badgeSnoozed'),
     markDone: t_('markDone'), snooze: t_('snooze'), undo: t_('undo'), unsnooze: t_('unsnooze'),
     snoozeNever: t_('snoozeNever'), snoozePick: t_('snoozePick'), snoozePickDate: t_('snoozePickDate'),
@@ -1403,7 +1417,7 @@ function uiStrings_() {
 // Strings + option maps the Add-cards wizard (AddCards.html) renders entirely from.
 function addUiStrings_() {
   return {
-    title: t_('addTitle'), subtitle: t_('addSubtitle'),
+    title: t_('addTitle'),
     editTitle: t_('editCard'), editSubtitle: t_('editSubtitle'), editSubmit: t_('editSubmit'),
     savedTitle: t_('editSavedTitle'), labelUpdated: t_('editLabelUpdated'), labelAdded: t_('editLabelAdded'),
     labelRemoved: t_('editLabelRemoved'), keepEditing: t_('editKeepEditing'),
@@ -1435,7 +1449,7 @@ function addUiStrings_() {
 }
 
 function htmlMessage_(msg) {
-  const url = ScriptApp.getService().getUrl();
+  const url = webAppUrl_();
   return HtmlService.createHtmlOutput(
     '<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;padding:40px;text-align:center;font-size:18px;color:#1a1a18;background:#faf9f5">' +
     esc_(msg) + '<br><br><a href="' + url + '" style="color:#185FA5;font-size:15px">' +

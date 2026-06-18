@@ -43,6 +43,7 @@ vm.createContext(sb); vm.runInContext(code, sb);
 const SR = sb.shouldRemind_, PED = sb.periodEndDate_, DB = sb.daysBetween_, FSD = sb.fmtShortDate_, UC = sb.updateCard, GCR = sb.getCardRows_, U = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
 const PRD = sb.periodRefreshDate_, SUDN = sb.snoozeUntilDayNumber_, DN = sb.dayNumber_;
 const PA = sb.parseAmount_, AFPSY = sb.annualFeePeriodStartYear_, AFRD = sb.annualFeeResetDate_, RAD = sb.realizedAfterDone_, RAU = sb.realizedAfterUndo_;
+const DA = sb.displayAmount_;
 const PK = sb.periodKey_, PSDN = sb.periodStartDayNumber_, BPB = sb.benefitPeriodBasis_, NA = sb.normalizeAnniversary_;
 let pass = 0, fail = 0;
 const t = (n, g, e) => { if (JSON.stringify(g) === JSON.stringify(e)) pass++; else { fail++; console.log("  FAIL " + n + ": got " + JSON.stringify(g) + " exp " + JSON.stringify(e)); } };
@@ -72,6 +73,13 @@ t("parseAmount $25", PA('$25'), 25);
 t("parseAmount bare 10", PA('10'), 10);
 t("parseAmount Unlimited", PA('Unlimited'), null);
 t("parseAmount 12 visits", PA('12 visits'), null);     // no $, not a bare number → not 12
+// displayAmount_ — email/display $-prefix for bare numbers; leave $-amounts + non-$ text alone
+t("displayAmount bare 300 → $300", DA('300'), '$300');
+t("displayAmount bare 12.95 → $12.95", DA('12.95'), '$12.95');
+t("displayAmount $100 unchanged", DA('$100'), '$100');
+t("displayAmount Priority Pass unchanged", DA('Priority Pass'), 'Priority Pass');
+t("displayAmount 12 visits unchanged", DA('12 visits'), '12 visits');
+t("displayAmount blank unchanged", DA(''), '');
 t("afYear after anniversary", AFPSY('2024-06-06', U(2026, 6, 16)), 2026);
 t("afYear on anniversary day", AFPSY('2024-06-16', U(2026, 6, 16)), 2026);   // d >= od is inclusive
 t("afYear before anniversary", AFPSY('2024-06-06', U(2026, 3, 1)), 2025);
