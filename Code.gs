@@ -16,6 +16,11 @@ const CONFIG = {
   DEFAULT_REMINDER_DAYS: 4,
   SNOOZE_DEFAULT_DAYS: 3,
   DAILY_HOUR: 9,                                  // 24h, script timezone
+  // Reminder cadence (global): 'minimal' = one nudge at the start of a period + one near expiry;
+  // 'persistent' = additionally re-nudge every REMINDER_REPEAT_DAYS within the near-expiry window
+  // until the benefit is done/snoozed. Change this one value to switch how naggy reminders are.
+  REMINDER_CADENCE: 'minimal',                    // 'minimal' | 'persistent'
+  REMINDER_REPEAT_DAYS: 2,                         // persistent: days between re-nudges in the expiry window
   CATALOG_REVIEW_AFTER_MONTHS: 6,                 // flag catalog rows whose LastVerified is older than this
   CATALOG_REVIEW_HOUR: 10,                        // 24h, script timezone — monthly stale-catalog review email
   SHEET_NAME: 'Benefits',
@@ -975,8 +980,13 @@ function getCardRows_(card) {
 // Period-driven: nudge once when a new period starts ("you have a fresh credit"), and once more as
 // it nears expiry ("use it before it resets"). LastReminded (a date) is the only stored state — we
 // compare its day number against each trigger day, so each nudge fires at most once per period and
-// the cadence follows the reset frequency itself (no per-benefit ReminderDays needed).
-function shouldRemind_(row, now) {
+// the base cadence follows the reset frequency itself (no per-benefit ReminderDays needed). In
+// 'persistent' cadence (CONFIG.REMINDER_CADENCE) the near-expiry nudge also REPEATS every
+// `repeatDays` until the benefit is done/snoozed. cadence/repeatDays are params (default from CONFIG)
+// so verify can pin both modes.
+function shouldRemind_(row, now, cadence, repeatDays) {
+  cadence = cadence || CONFIG.REMINDER_CADENCE;
+  repeatDays = repeatDays || CONFIG.REMINDER_REPEAT_DAYS;
   const today = dayNumber_(now);
   const lr = row.lastReminded ? dayNumber_(row.lastReminded) : -Infinity;
   const start = periodStartDayNumber_(row.reset, now, row.periodBasis, row.anniversary);
@@ -984,28 +994,36 @@ function shouldRemind_(row, now) {
   const end = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);
   if (end !== null) {
     const windowStart = end - reminderLeadDays_(row.reset) + 1;
-    if (today >= windowStart && lr < windowStart) return true;   // near-expiry nudge
+    if (today >= windowStart && lr < windowStart) return true;   // first near-expiry nudge
+    if (cadence === 'persistent' &&                              // re-nudge through the expiry window
+        today >= windowStart && today <= end && today - lr >= repeatDays) return true;
   }
   return false;
 }
 
 // The next day a reminder will fire for this row, given its stored lastReminded — mirrors
-// shouldRemind_ so the previewReminders() diagnostic can answer "when's the next email?". Returns
-// today's day number when a nudge is already due, or null for a 'once' benefit whose single nudge
-// has already passed (no future reminder). Pure, so verify.js can pin it.
-function nextReminderDayNumber_(row, now) {
+// shouldRemind_ (including persistent repeats) so the previewReminders() diagnostic can answer
+// "when's the next email?". Returns today's day number when a nudge is already due, or null for a
+// 'once' benefit whose single nudge has passed. cadence/repeatDays default from CONFIG. Pure.
+function nextReminderDayNumber_(row, now, cadence, repeatDays) {
+  cadence = cadence || CONFIG.REMINDER_CADENCE;
+  repeatDays = repeatDays || CONFIG.REMINDER_REPEAT_DAYS;
   const today = dayNumber_(now);
   const lr = row.lastReminded ? dayNumber_(row.lastReminded) : -Infinity;
-  if (shouldRemind_(row, now)) return today;                      // overdue / due today
+  if (shouldRemind_(row, now, cadence, repeatDays)) return today; // overdue / due today
   const end = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);
   if (end === null) return null;                                  // 'once', start nudge already sent
   const windowStart = end - reminderLeadDays_(row.reset) + 1;
-  if (lr < windowStart && windowStart > today) return windowStart; // near-expiry nudge still ahead
+  if (lr < windowStart && windowStart > today) return windowStart; // first near-expiry nudge still ahead
+  if (cadence === 'persistent' && lr >= windowStart && lr < end) {
+    const repeat = lr + repeatDays;                              // next in-window re-nudge (> today here)
+    if (repeat <= end) return repeat;
+  }
   return end + 1;                                                 // otherwise next period's start nudge
 }
 // Same, as a noon-anchored Date (or null) for display.
-function nextReminderDate_(row, now) {
-  const d = nextReminderDayNumber_(row, now);
+function nextReminderDate_(row, now, cadence, repeatDays) {
+  const d = nextReminderDayNumber_(row, now, cadence, repeatDays);
   return d === null ? null : new Date(d * 86400000 + 12 * 3600000);
 }
 

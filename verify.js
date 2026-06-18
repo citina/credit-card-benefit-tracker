@@ -65,6 +65,14 @@ t("nextReminder monthly midperiod", FSD(NRD({ reset: 'monthly', lastReminded: U(
 t("nextReminder monthly due now", FSD(NRD({ reset: 'monthly', lastReminded: U(2026, 6, 2) }, U(2026, 6, 27))), "Jun 27");
 t("nextReminder annual midyear", FSD(NRD({ reset: 'annual', lastReminded: U(2026, 1, 1) }, U(2026, 6, 18))), "Dec 2");
 t("nextReminder once already sent → null", NRD({ reset: 'once', lastReminded: U(2026, 6, 1) }, U(2026, 6, 15)), null);
+// reminder cadence: 'persistent' re-nudges every repeatDays in the expiry window; 'minimal' does not
+// monthly window = Jun26..Jun30 (lead 5). First nudge already sent at lr=Jun26.
+t("cadence persistent re-nudges (2d)", SR({ reset: 'monthly', lastReminded: U(2026, 6, 26) }, U(2026, 6, 28), 'persistent', 2), true);
+t("cadence persistent too soon (1d)", SR({ reset: 'monthly', lastReminded: U(2026, 6, 27) }, U(2026, 6, 28), 'persistent', 2), false);
+t("cadence minimal no re-nudge", SR({ reset: 'monthly', lastReminded: U(2026, 6, 26) }, U(2026, 6, 28), 'minimal', 2), false);
+t("nextReminder persistent next repeat", FSD(NRD({ reset: 'monthly', lastReminded: U(2026, 6, 26) }, U(2026, 6, 27), 'persistent', 2)), "Jun 28");
+t("nextReminder minimal skips to next period", FSD(NRD({ reset: 'monthly', lastReminded: U(2026, 6, 26) }, U(2026, 6, 27), 'minimal', 2)), "Jul 1");
+t("nextReminder persistent past window → next period", FSD(NRD({ reset: 'monthly', lastReminded: U(2026, 6, 30) }, U(2026, 6, 30), 'persistent', 2)), "Jul 1");
 // #1 refresh date (start of next period, shown on done rows) + #5 snooze clamping (pure helper)
 t("refresh monthly", FSD(PRD('monthly', U(2026, 6, 15))), "Jul 1");
 t("refresh annual", FSD(PRD('annual', U(2026, 6, 15))), "Jan 1");
