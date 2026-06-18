@@ -167,6 +167,7 @@ const STRINGS = {
     snoozePickDate: 'Snooze until…',
     addSelectAll: 'Select all',
     addClearAll: 'Clear all',
+    addClearAllConfirm: 'Clear all unchecks these {n} benefit(s); saving removes them from this card:',
     // Add-cards wizard
     addCards: '+ Add cards',
     addTitle: 'Add cards',
@@ -265,6 +266,7 @@ const STRINGS = {
     snoozePickDate: '推迟到…',
     addSelectAll: '全选',
     addClearAll: '清除',
+    addClearAllConfirm: 'Clear all 会取消勾选这 {n} 项权益,保存后会把它们从这张卡移除:',
     // Add-cards wizard
     addCards: '+ 添加卡片',
     addTitle: '添加卡片',
@@ -897,6 +899,26 @@ function shouldRemind_(row, now) {
   return false;
 }
 
+// The next day a reminder will fire for this row, given its stored lastReminded — mirrors
+// shouldRemind_ so the previewReminders() diagnostic can answer "when's the next email?". Returns
+// today's day number when a nudge is already due, or null for a 'once' benefit whose single nudge
+// has already passed (no future reminder). Pure, so verify.js can pin it.
+function nextReminderDayNumber_(row, now) {
+  const today = dayNumber_(now);
+  const lr = row.lastReminded ? dayNumber_(row.lastReminded) : -Infinity;
+  if (shouldRemind_(row, now)) return today;                      // overdue / due today
+  const end = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);
+  if (end === null) return null;                                  // 'once', start nudge already sent
+  const windowStart = end - reminderLeadDays_(row.reset) + 1;
+  if (lr < windowStart && windowStart > today) return windowStart; // near-expiry nudge still ahead
+  return end + 1;                                                 // otherwise next period's start nudge
+}
+// Same, as a noon-anchored Date (or null) for display.
+function nextReminderDate_(row, now) {
+  const d = nextReminderDayNumber_(row, now);
+  return d === null ? null : new Date(d * 86400000 + 12 * 3600000);
+}
+
 function sendReminders() {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(30000); } catch (e) { return; }
@@ -927,6 +949,47 @@ function sendReminders() {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Read-only diagnostic — run manually from the editor (Run ▸ previewReminders). Sends no email and
+// writes nothing; it just logs whether the daily trigger is installed and, for every tracked
+// benefit, its done/snooze state plus the next date a reminder will fire. Use it to confirm the
+// engine is healthy without waiting for 9am (a quiet, email-free day mid-period is expected — a
+// nudge fires only at the start of a period and once near expiry). No trailing underscore, or it
+// would not show up in the editor's Run dropdown (PITFALLS #16).
+function previewReminders() {
+  requireAuth_();
+  const now = new Date();
+  const tz = Session.getScriptTimeZone();
+  const triggers = ScriptApp.getProjectTriggers().filter(function (tr) {
+    return tr.getHandlerFunction() === 'sendReminders';
+  });
+  Logger.log('Reminder email → ' + CONFIG.EMAIL + ' at ~' + CONFIG.DAILY_HOUR + ':00 (' + tz + ')');
+  Logger.log('sendReminders trigger installed: ' +
+    (triggers.length ? 'yes (' + triggers.length + ')' : 'NO — run setup() to (re)create it'));
+
+  const data = readRows_();
+  if (data.missing) { Logger.log('No Benefits sheet — run setup() first.'); return { missing: true }; }
+  if (!data.rows.length) { Logger.log('No benefits tracked yet.'); return { rows: [] }; }
+
+  const report = data.rows.map(function (row) {
+    const done = isDone_(row, now);
+    const snoozed = isSnoozed_(row, now);
+    const dueNow = !done && !snoozed && shouldRemind_(row, now);
+    const next = nextReminderDate_(row, now);
+    return {
+      card: row.card, benefit: row.benefit, done: done, snoozed: snoozed, dueNow: dueNow,
+      next: next ? fmtShortDate_(next) : '—',
+    };
+  });
+  const dueCount = report.filter(function (r) { return r.dueNow; }).length;
+  Logger.log('Would email now: ' + dueCount + ' benefit(s).' +
+    (dueCount ? '' : ' (nothing due — a quiet day mid-period is expected.)'));
+  report.forEach(function (r) {
+    const state = r.done ? 'done' : (r.snoozed ? 'snoozed' : (r.dueNow ? 'DUE NOW' : 'waiting'));
+    Logger.log('• ' + r.card + ' — ' + r.benefit + ' | ' + state + ' | next reminder: ' + r.next);
+  });
+  return { dueCount: dueCount, report: report };
 }
 
 function reminderHtml_(due) {
@@ -1154,8 +1217,11 @@ function addBenefits(card, items) {
   }
 }
 
+// Transient case-insensitive card+benefit key for in-call dedup (never persisted). JSON.stringify
+// gives a visible, collision-proof separator — this once used a literal NUL byte, which made
+// `file Code.gs` report binary and forced `grep -a` / `rg --text` all session.
 function dedupKey_(card, benefit) {
-  return String(card).toLowerCase().trim() + ' ' + String(benefit).toLowerCase().trim();
+  return JSON.stringify([String(card).toLowerCase().trim(), String(benefit).toLowerCase().trim()]);
 }
 function slugify_(s) {
   return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -1190,37 +1256,49 @@ function updateCard(card, items) {
       if (String(r.card).toLowerCase().trim() === key) existing[String(r.id)] = r;
     });
 
-    const updates = [], newRows = [], keep = {}, seen = {};
-    (items || []).forEach(function (it) {
+    const list = (items || []);
+    const normItem_ = function (it) {
       const benefit = String(it && it.benefit != null ? it.benefit : '').trim();
-      if (!benefit) return;
       let rd = Math.round(Number(it && it.reminderDays));
       if (!(rd >= 1)) rd = CONFIG.DEFAULT_REMINDER_DAYS;
       const vals = [benefit, String(it && it.amount != null ? it.amount : '').trim(),
                     validCategory_(it && it.category), normalizeReset_(it && it.reset)];
-      const id = it && it.id ? String(it.id) : '';
-      if (id && existing[id]) {
-        const cur = existing[id];
-        keep[id] = true;  // resubmitted → keep the row even when nothing changed
-        // Only treat it as an update (write + report) if a field actually differs from the stored
-        // row. The wizard resubmits every prefilled row unchanged, so without this diff the
-        // "Updated:" summary would list untouched benefits and inflate the count. Compare against
-        // the same normalization the new vals went through (category/reset/trim).
-        const changed =
-          vals[0] !== String(cur.benefit == null ? '' : cur.benefit).trim() ||
-          vals[1] !== String(cur.amount == null ? '' : cur.amount).trim() ||
-          vals[2] !== validCategory_(cur.category) ||
-          vals[3] !== normalizeReset_(cur.reset) ||
-          rd !== cur.reminderDays;
-        if (changed) updates.push({ rowIndex: cur.rowIndex, vals: vals, rd: rd });
-      } else {
-        const k = key + ' ' + benefit.toLowerCase();
-        if (seen[k]) return;
-        seen[k] = true;
-        const newId = uniqueId_(cardName, benefit, usedId);
-        usedId[newId] = true;
-        newRows.push([newId, cardName, vals[0], vals[1], vals[2], vals[3], rd, '', '', '', '', '']);
-      }
+      return { benefit: benefit, rd: rd, vals: vals, id: it && it.id ? String(it.id) : '' };
+    };
+
+    // Pass 1 — resubmitted existing rows (update in place / keep). Seed the dedup set with each
+    // kept row's (possibly edited) name so a new row in pass 2 can't duplicate a surviving benefit.
+    const updates = [], newRows = [], keep = {}, seen = {};
+    list.forEach(function (it) {
+      const n = normItem_(it);
+      if (!n.benefit || !(n.id && existing[n.id])) return;
+      const cur = existing[n.id];
+      keep[n.id] = true;  // resubmitted → keep the row even when nothing changed
+      seen[dedupKey_(cardName, n.benefit)] = true;
+      // Only treat it as an update (write + report) if a field actually differs from the stored
+      // row. The wizard resubmits every prefilled row unchanged, so without this diff the
+      // "Updated:" summary would list untouched benefits and inflate the count. Compare against
+      // the same normalization the new vals went through (category/reset/trim).
+      const changed =
+        n.vals[0] !== String(cur.benefit == null ? '' : cur.benefit).trim() ||
+        n.vals[1] !== String(cur.amount == null ? '' : cur.amount).trim() ||
+        n.vals[2] !== validCategory_(cur.category) ||
+        n.vals[3] !== normalizeReset_(cur.reset) ||
+        n.rd !== cur.reminderDays;
+      if (changed) updates.push({ rowIndex: cur.rowIndex, vals: n.vals, rd: n.rd });
+    });
+
+    // Pass 2 — new rows (no id, or an id not on this card). Skip any that collide with a kept row
+    // or an earlier new row, so edit mode can't introduce a duplicate benefit name (review #5).
+    list.forEach(function (it) {
+      const n = normItem_(it);
+      if (!n.benefit || (n.id && existing[n.id])) return;  // handled in pass 1
+      const k = dedupKey_(cardName, n.benefit);
+      if (seen[k]) return;
+      seen[k] = true;
+      const newId = uniqueId_(cardName, n.benefit, usedId);
+      usedId[newId] = true;
+      newRows.push([newId, cardName, n.vals[0], n.vals[1], n.vals[2], n.vals[3], n.rd, '', '', '', '', '']);
     });
 
     const removeIdx = [], removedNames = [];
@@ -1433,7 +1511,7 @@ function addUiStrings_() {
       ? ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
       : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     addBenefit: t_('addAnotherBenefit'), submit: t_('addSubmit'), cancel: t_('confirmCancel'),
-    selectAll: t_('addSelectAll'), clearAll: t_('addClearAll'),
+    selectAll: t_('addSelectAll'), clearAll: t_('addClearAll'), clearAllConfirm: t_('addClearAllConfirm'),
     pickCardFirst: t_('addPickCardFirst'), needCardName: t_('addNeedCardName'), needOne: t_('addNeedOne'), needName: t_('addNeedName'),
     needAnniversary: t_('addNeedAnniversary'),
     addedSummary: t_('addedSummary'), addedSummaryNoSkip: t_('addedSummaryNoSkip'), addedNone: t_('addedNone'),

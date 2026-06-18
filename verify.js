@@ -42,6 +42,7 @@ const sb = {
 vm.createContext(sb); vm.runInContext(code, sb);
 const SR = sb.shouldRemind_, PED = sb.periodEndDate_, DB = sb.daysBetween_, FSD = sb.fmtShortDate_, UC = sb.updateCard, GCR = sb.getCardRows_, U = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
 const PRD = sb.periodRefreshDate_, SUDN = sb.snoozeUntilDayNumber_, DN = sb.dayNumber_;
+const NRD = sb.nextReminderDate_;
 const PA = sb.parseAmount_, AFPSY = sb.annualFeePeriodStartYear_, AFRD = sb.annualFeeResetDate_, RAD = sb.realizedAfterDone_, RAU = sb.realizedAfterUndo_;
 const DA = sb.displayAmount_;
 const PK = sb.periodKey_, PSDN = sb.periodStartDayNumber_, BPB = sb.benefitPeriodBasis_, NA = sb.normalizeAnniversary_;
@@ -57,6 +58,13 @@ t("once first", SR({ reset: 'once', lastReminded: null }, U(2026, 6, 15)), true)
 t("monthly daysleft", DB(U(2026, 6, 15), PED('monthly', U(2026, 6, 15))), 15);
 t("annual expiry date", FSD(PED('annual', U(2026, 6, 15))), "Dec 31");
 t("once no expiry", PED('once', U(2026, 6, 15)), null);
+// no literal NUL byte in Code.gs (it once classified the file as binary — review #3)
+t("Code.gs has no NUL byte", code.indexOf('\u0000'), -1);
+// next-reminder date (drives previewReminders): mid-period → near-expiry nudge; in-window → due now
+t("nextReminder monthly midperiod", FSD(NRD({ reset: 'monthly', lastReminded: U(2026, 6, 2) }, U(2026, 6, 15))), "Jun 26");
+t("nextReminder monthly due now", FSD(NRD({ reset: 'monthly', lastReminded: U(2026, 6, 2) }, U(2026, 6, 27))), "Jun 27");
+t("nextReminder annual midyear", FSD(NRD({ reset: 'annual', lastReminded: U(2026, 1, 1) }, U(2026, 6, 18))), "Dec 2");
+t("nextReminder once already sent → null", NRD({ reset: 'once', lastReminded: U(2026, 6, 1) }, U(2026, 6, 15)), null);
 // #1 refresh date (start of next period, shown on done rows) + #5 snooze clamping (pure helper)
 t("refresh monthly", FSD(PRD('monthly', U(2026, 6, 15))), "Jul 1");
 t("refresh annual", FSD(PRD('annual', U(2026, 6, 15))), "Jan 1");
@@ -149,5 +157,17 @@ var gcr = GCR('Amex Gold');
 t("getCardRows current count", gcr.benefits.length, 1);
 t("getCardRows suggestions count", gcr.suggestions.length, 3);
 t("getCardRows custom flag (catalog benefit)", gcr.benefits[0].custom, false);   // Uber Cash is in the Amex Gold catalog
+// #5 edit-mode dedup: a new (id-less) row duplicating an existing benefit name is skipped — even when
+// it appears BEFORE the resubmitted existing row in the payload (proves the two-pass dedup).
+currentSheet = makeSheet([
+  ['amex_uber', 'Amex Gold', 'Uber Cash', '$10', 'other', 'monthly', 4, '2026-06', '', ''],
+]);
+var resd = UC('Amex Gold', [
+  { benefit: 'Uber Cash', amount: '$99', category: 'other', reset: 'monthly' },   // new dup, listed first
+  { id: 'amex_uber', benefit: 'Uber Cash', amount: '$10', category: 'other', reset: 'monthly', reminderDays: 4 },
+]);
+t("dedup edit: no dup added", resd.added, []);
+t("dedup edit: one Uber Cash row", currentSheet._grid.filter(r => r[1] === 'Amex Gold' && r[2] === 'Uber Cash').length, 1);
+t("dedup edit: existing status preserved", (currentSheet._grid.find(r => r[0] === 'amex_uber') || [])[7], '2026-06');
 console.log("logic asserts: " + pass + " passed, " + fail + " failed");
 if (fail || !okAll) process.exitCode = 1;

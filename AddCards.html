@@ -345,7 +345,20 @@
     });
   }
   document.getElementById('selectAll').addEventListener('click', function(){ setAllChecks(true); });
-  document.getElementById('clearAll').addEventListener('click', function(){ setAllChecks(false); });
+  document.getElementById('clearAll').addEventListener('click', function(){
+    // In edit mode, clearing every check then saving deletes the card's existing benefits. Confirm
+    // first, listing exactly which currently-tracked benefits would be removed (UI#1).
+    if(EDIT){
+      var toRemove=[];
+      Array.prototype.forEach.call(benefitsBox.querySelectorAll('.ben'), function(row){
+        if(row.classList.contains('removed')) return;
+        var c=row._fields&&row._fields.chk;
+        if(row._id && c && c.checked) toRemove.push(row._fields.name.value.trim()||row._id);
+      });
+      if(toRemove.length && !window.confirm(fmt(UI.clearAllConfirm,{n:toRemove.length})+'\n\n• '+toRemove.join('\n• '))) return;
+    }
+    setAllChecks(false);
+  });
 
   submitBtn.addEventListener('click', function(){
     hideErr();
