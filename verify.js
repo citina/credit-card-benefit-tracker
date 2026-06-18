@@ -230,5 +230,9 @@ t("monthsSince unparseable null", MSV('soon', U(2026, 6, 18)), null);
 t("catalogStale fresh (5mo) false", CS('2026-01', U(2026, 6, 18)), false);
 t("catalogStale old (6mo) true", CS('2025-12', U(2026, 6, 18)), true);
 t("catalogStale blank not flagged", CS('', U(2026, 6, 18)), false);
+// reviewStaleCatalog selection (pure): only cards past the threshold, blank dates excluded
+t("staleCatalogCards filters by date",
+  sb.staleCatalogCards_([{ card: 'A', lastVerified: '2025-12' }, { card: 'B', lastVerified: '2026-06' }, { card: 'C', lastVerified: '' }], U(2026, 6, 18)).map(c => c.card),
+  ['A']);
 console.log("logic asserts: " + pass + " passed, " + fail + " failed");
 if (fail || !okAll) process.exitCode = 1;

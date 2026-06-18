@@ -127,6 +127,11 @@ const STRINGS = {
     emailDone: 'Done',
     emailSnooze: 'Snooze {d}d',
     openDashboard: 'Open the full dashboard →',
+    catalogReviewSubject: 'Catalog review: {n} card(s) to re-verify',
+    catalogReviewHeading: '{n} card(s) may have outdated benefits',
+    catalogReviewIntro: 'These were last verified a while ago. Check the issuer terms, then update the Catalog sheet (LastVerified, amounts, etc.). Nothing is changed automatically.',
+    catalogReviewVerified: 'Last verified {date} · {months} months ago',
+    catalogReviewSource: 'Open source page',
     dashTitle: 'Card benefit tracker',
     badgeDone: 'Done',
     badgeToUse: 'To use',
@@ -228,6 +233,11 @@ const STRINGS = {
     emailDone: '已使用',
     emailSnooze: '推迟{d}天',
     openDashboard: '打开完整面板 →',
+    catalogReviewSubject: 'Catalog 复核:{n} 张卡待重新核实',
+    catalogReviewHeading: '{n} 张卡的权益可能已过期',
+    catalogReviewIntro: '这些卡距上次核实已有一段时间。请对照发卡机构条款,然后手动更新 Catalog sheet(LastVerified、金额等)。系统不会自动改动任何数据。',
+    catalogReviewVerified: '上次核实 {date} · {months} 个月前',
+    catalogReviewSource: '打开来源页面',
     dashTitle: '信用卡权益追踪',
     badgeDone: '已使用',
     badgeToUse: '待使用',
@@ -385,10 +395,13 @@ function setup() {
   setupCards();
   setupCatalog();
   ScriptApp.getProjectTriggers().forEach(function (tr) {
-    if (tr.getHandlerFunction() === 'sendReminders') ScriptApp.deleteTrigger(tr);
+    const fn = tr.getHandlerFunction();
+    if (fn === 'sendReminders' || fn === 'reviewStaleCatalog') ScriptApp.deleteTrigger(tr);
   });
   ScriptApp.newTrigger('sendReminders')
     .timeBased().everyDays(1).atHour(CONFIG.DAILY_HOUR).create();
+  ScriptApp.newTrigger('reviewStaleCatalog')             // monthly: nudge to re-verify stale catalog rows
+    .timeBased().onMonthDay(1).atHour(CONFIG.CATALOG_REVIEW_HOUR).create();
   Logger.log('Setup complete. Now deploy as a Web App (execute as me, access "Only myself").');
 }
 
@@ -1103,6 +1116,47 @@ function reminderHtml_(due) {
       '</tr>';
   });
   html += '</table>';
+  html += '<p style="margin-top:20px"><a href="' + url + '" style="color:#185FA5">' +
+    esc_(t_('openDashboard')) + '</a></p></div>';
+  return html;
+}
+
+// Catalog cards whose LastVerified is older than CATALOG_REVIEW_AFTER_MONTHS. Pure (now injected),
+// so verify can pin the selection independent of the wall clock.
+function staleCatalogCards_(cards, now) {
+  return (cards || []).filter(function (c) { return catalogStale_(c.lastVerified, now); });
+}
+
+// Monthly stale-catalog review (time trigger at CATALOG_REVIEW_HOUR; Apps Script passes an event arg
+// we ignore). READ-ONLY by design: emails CONFIG.EMAIL a list of cards whose catalog terms are due
+// for a manual re-check, with source links — it NEVER mutates the catalog or tracked benefits
+// (issuer pages have footnotes/targeted offers; auto-applying changes could silently corrupt data).
+function reviewStaleCatalog() {
+  const now = new Date();
+  const cards = staleCatalogCards_(getCatalogData_().cards, now);
+  if (!cards.length) return;  // nothing stale → no email
+  MailApp.sendEmail({
+    to: CONFIG.EMAIL,
+    subject: fmt_(t_('catalogReviewSubject'), { n: cards.length }),
+    htmlBody: catalogReviewHtml_(cards, now),
+  });
+}
+
+function catalogReviewHtml_(cards, now) {
+  const url = webAppUrl_();
+  let html = '<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:560px">';
+  html += '<h2 style="font-weight:500;color:#1a1a18">' + esc_(fmt_(t_('catalogReviewHeading'), { n: cards.length })) + '</h2>';
+  html += '<p style="font-size:13px;color:#6b6a64;line-height:1.5">' + esc_(t_('catalogReviewIntro')) + '</p>';
+  cards.forEach(function (c) {
+    const months = monthsSinceVerified_(c.lastVerified, now);
+    html += '<div style="border-top:1px solid #e6e4dc;padding:12px 0">';
+    html += '<div style="font-size:15px;color:#1a1a18">' + esc_(c.card) + '</div>';
+    html += '<div style="font-size:13px;color:#6b6a64">' +
+      esc_(fmt_(t_('catalogReviewVerified'), { date: c.lastVerified || '—', months: (months == null ? '?' : months) })) + '</div>';
+    const su = /^https?:\/\//i.test(String(c.sourceUrl || '')) ? c.sourceUrl : '';
+    if (su) html += '<a href="' + esc_(su) + '" style="color:#185FA5;font-size:13px">' + esc_(t_('catalogReviewSource')) + ' →</a>';
+    html += '</div>';
+  });
   html += '<p style="margin-top:20px"><a href="' + url + '" style="color:#185FA5">' +
     esc_(t_('openDashboard')) + '</a></p></div>';
   return html;
