@@ -16,6 +16,8 @@ const CONFIG = {
   DEFAULT_REMINDER_DAYS: 4,
   SNOOZE_DEFAULT_DAYS: 3,
   DAILY_HOUR: 9,                                  // 24h, script timezone
+  CATALOG_REVIEW_AFTER_MONTHS: 6,                 // flag catalog rows whose LastVerified is older than this
+  CATALOG_REVIEW_HOUR: 10,                        // 24h, script timezone — monthly stale-catalog review email
   SHEET_NAME: 'Benefits',
   CATALOG_SHEET: 'Catalog',                       // editable benefit catalog the Add-cards wizard reads
   CARDS_SHEET: 'Cards',                           // per-card annual fee + open date (for the realized-value bar)
@@ -109,7 +111,11 @@ const CATALOG = {
     ],
   },
 };
-const CATALOG_HEADERS = ['Card', 'LastVerified', 'Benefit', 'Amount', 'Category', 'Reset', 'ReminderDays'];
+// Appended columns (SourceUrl/PeriodBasis/Notes) are migrated onto existing sheets by ensureHeaders_
+// (PITFALLS #2 — append only, never reorder). getCatalogData_ reads by header NAME, so old 7-column
+// sheets and new 10-column sheets both parse.
+const CATALOG_HEADERS = ['Card', 'LastVerified', 'Benefit', 'Amount', 'Category', 'Reset', 'ReminderDays',
+                         'SourceUrl', 'PeriodBasis', 'Notes'];
 
 // ----------------------------- STRINGS (i18n) -----------------------------
 // All user-facing text lives here. Add a language = add a block. {placeholders} via fmt_().
@@ -392,17 +398,35 @@ function seedExamples_(sheet) {
   rows.forEach(function (r) { sheet.appendRow(r); });
 }
 
-// Create + seed the editable Catalog sheet from the CATALOG constant if it doesn't exist yet.
-// Idempotent: leaves an existing sheet (which the user may have edited) untouched.
+// Append any of `headers` missing from an existing sheet's header row to the right, preserving every
+// existing column and value (PITFALLS #2 — migrations append, never reorder/clear). Idempotent;
+// returns the resulting header list. New columns leave existing data rows blank (read as defaults).
+function ensureHeaders_(sheet, headers) {
+  const lastCol = sheet.getLastColumn();
+  const cur = lastCol ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); }) : [];
+  const missing = headers.filter(function (h) { return cur.indexOf(h) === -1; });
+  if (missing.length) {
+    sheet.getRange(1, cur.length + 1, 1, missing.length).setValues([missing]);
+    sheet.getRange(1, 1, 1, cur.length + missing.length).setFontWeight('bold');
+  }
+  return cur.concat(missing);
+}
+
+// Create + seed the editable Catalog sheet from the CATALOG constant. If it already exists (the user
+// may have edited it), only append any missing columns (SourceUrl/PeriodBasis/Notes migration) —
+// existing rows/values are preserved. SourceUrl/Notes seed blank (filled by the user); PeriodBasis
+// seeds from the constant so anniversary-basis benefits carry their flag.
 function setupCatalog() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (ss.getSheetByName(CONFIG.CATALOG_SHEET)) return;
+  const existing = ss.getSheetByName(CONFIG.CATALOG_SHEET);
+  if (existing) { ensureHeaders_(existing, CATALOG_HEADERS); return; }
   const sheet = ss.insertSheet(CONFIG.CATALOG_SHEET);
   const rows = [CATALOG_HEADERS];
   Object.keys(CATALOG).forEach(function (card) {
     const entry = CATALOG[card];
     entry.benefits.forEach(function (b) {
-      rows.push([card, entry.lastVerified, b.benefit, b.amount, b.category, b.reset, b.reminderDays]);
+      rows.push([card, entry.lastVerified, b.benefit, b.amount, b.category, b.reset, b.reminderDays,
+                 b.sourceUrl || entry.sourceUrl || '', b.periodBasis || 'calendar', b.notes || '']);
     });
   });
   sheet.getRange(1, 1, rows.length, CATALOG_HEADERS.length).setValues(rows);
@@ -667,6 +691,10 @@ function normalizeReset_(v) {
   if (r === 'once' || r === 'onetime' || r === 'onceonly') return 'once';
   return r;  // unknown → treated as one-time downstream (periodKey_ → ONCE)
 }
+// Catalog PeriodBasis cell → 'anniversary' | 'calendar' (default). Blank/unknown → calendar.
+function normalizeBasis_(v) {
+  return String(v == null ? '' : v).toLowerCase().trim() === 'anniversary' ? 'anniversary' : 'calendar';
+}
 function readRows_() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME);
   if (!sheet) return { sheet: null, rows: [], missing: true };
@@ -805,39 +833,78 @@ function validCategory_(c) {
   return CATEGORIES.indexOf(v) !== -1 ? v : 'other';
 }
 
-// The catalog as the wizard consumes it: { cards: [{ card, lastVerified, benefits:[...] }] }.
-// Prefers the editable Catalog sheet (so user edits win); falls back to the CATALOG constant.
+// Whole months between a 'YYYY-MM' / 'YYYY-MM-DD' LastVerified and `now`; null if unparseable.
+// Day is ignored (row-level freshness is month-grained). Shared by the wizard's staleness warning
+// and reviewStaleCatalog(). Pure (tz via stubs) so verify can pin it.
+function monthsSinceVerified_(lastVerified, now) {
+  const m = String(lastVerified == null ? '' : lastVerified).trim().match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  const tz = Session.getScriptTimeZone();
+  const nowY = Number(Utilities.formatDate(now, tz, 'yyyy'));
+  const nowMo = Number(Utilities.formatDate(now, tz, 'MM'));
+  return (nowY - y) * 12 + (nowMo - mo);
+}
+// True when a catalog entry's LastVerified is at least CATALOG_REVIEW_AFTER_MONTHS old. Unparseable
+// / blank dates are NOT flagged stale (avoids nagging about hand-entered rows with no date).
+function catalogStale_(lastVerified, now) {
+  const months = monthsSinceVerified_(lastVerified, now);
+  return months !== null && months >= CONFIG.CATALOG_REVIEW_AFTER_MONTHS;
+}
+
+// The catalog as the wizard consumes it:
+//   { cards: [{ card, lastVerified, sourceUrl, benefits:[{ ..., sourceUrl, periodBasis, notes }] }] }
+// Prefers the editable Catalog sheet (so user edits win); falls back to the CATALOG constant. Reads
+// the sheet by HEADER NAME (not column position), so old 7-column and new 10-column sheets both work.
 // Not auth-gated itself — callers (getCatalog / addCardsPage_) sit behind requireAuth_ / doGet.
 function getCatalogData_() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.CATALOG_SHEET);
   if (sheet && sheet.getLastRow() >= 2) {
-    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, CATALOG_HEADERS.length).getValues();
+    const lastCol = sheet.getLastColumn();
+    const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+    const idx = {};
+    header.forEach(function (h, i) { if (idx[h] == null) idx[h] = i; });
+    const col = function (v, name) { const i = idx[name]; return i == null ? '' : v[i]; };
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
     const byCard = {};
     const order = [];
     values.forEach(function (v) {
-      const card = String(v[0] || '').trim();
-      const benefit = String(v[2] || '').trim();
+      const card = String(col(v, 'Card') || '').trim();
+      const benefit = String(col(v, 'Benefit') || '').trim();
       if (!card || !benefit) return;  // skip blank/partial rows
-      if (!byCard[card]) { byCard[card] = { card: card, lastVerified: String(v[1] || ''), benefits: [] }; order.push(card); }
+      const lastVerified = String(col(v, 'LastVerified') || '');
+      const sourceUrl = String(col(v, 'SourceUrl') || '').trim();
+      if (!byCard[card]) { byCard[card] = { card: card, lastVerified: lastVerified, sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
+      if (!byCard[card].lastVerified && lastVerified) byCard[card].lastVerified = lastVerified;  // first non-blank wins
+      if (!byCard[card].sourceUrl && sourceUrl) byCard[card].sourceUrl = sourceUrl;
       byCard[card].benefits.push({
         benefit: benefit,
-        amount: String(v[3] || ''),
-        category: validCategory_(v[4]),
-        reset: normalizeReset_(v[5]),
-        reminderDays: Number(v[6]) || CONFIG.DEFAULT_REMINDER_DAYS,
+        amount: String(col(v, 'Amount') || ''),
+        category: validCategory_(col(v, 'Category')),
+        reset: normalizeReset_(col(v, 'Reset')),
+        reminderDays: Number(col(v, 'ReminderDays')) || CONFIG.DEFAULT_REMINDER_DAYS,
+        sourceUrl: sourceUrl,
+        periodBasis: normalizeBasis_(col(v, 'PeriodBasis')),
+        notes: String(col(v, 'Notes') || '').trim(),
+        lastVerified: lastVerified,
       });
     });
     return { cards: order.map(function (k) { return byCard[k]; }) };
   }
-  // Fallback: the shipped constant.
+  // Fallback: the shipped constant (with the same new fields, defaulted).
   return {
     cards: Object.keys(CATALOG).map(function (card) {
+      const entry = CATALOG[card];
       return {
         card: card,
-        lastVerified: CATALOG[card].lastVerified,
-        benefits: CATALOG[card].benefits.map(function (b) {
+        lastVerified: entry.lastVerified,
+        sourceUrl: entry.sourceUrl || '',
+        benefits: entry.benefits.map(function (b) {
           return { benefit: b.benefit, amount: b.amount, category: validCategory_(b.category),
-                   reset: normalizeReset_(b.reset), reminderDays: Number(b.reminderDays) || CONFIG.DEFAULT_REMINDER_DAYS };
+                   reset: normalizeReset_(b.reset), reminderDays: Number(b.reminderDays) || CONFIG.DEFAULT_REMINDER_DAYS,
+                   sourceUrl: b.sourceUrl || entry.sourceUrl || '', periodBasis: b.periodBasis || 'calendar',
+                   notes: b.notes || '', lastVerified: entry.lastVerified };
         }),
       };
     }),

@@ -32,11 +32,11 @@ function fmt(d, _t, f) { const Y = d.getUTCFullYear(), M = d.getUTCMonth() + 1, 
   if (f === 'yyyy') return '' + Y; if (f === 'MM') return p2(M); if (f === 'dd') return p2(D); if (f === 'yyyy-MM') return Y + '-' + p2(M);
   if (f === 'yyyy-MM-dd') return Y + '-' + p2(M) + '-' + p2(D); if (f === 'MMM d') return MM[M - 1] + ' ' + D;
   if (f === 'M月d日') return M + '月' + D + '日'; return Y + '-' + p2(M) + '-' + p2(D); }
-let currentSheet = null, currentCards = null;
+let currentSheet = null, currentCards = null, currentCatalog = null;
 const sb = {
   Session: { getScriptTimeZone: () => 'UTC', getEffectiveUser: () => ({ getEmail: () => 'o@x' }), getActiveUser: () => ({ getEmail: () => 'o@x' }) },
   Utilities: { formatDate: fmt },
-  SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (name) => name === 'Catalog' ? null : (name === 'Cards' ? currentCards : currentSheet) }) },
+  SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (name) => name === 'Catalog' ? currentCatalog : (name === 'Cards' ? currentCards : currentSheet) }) },
   LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
   console };
 vm.createContext(sb); vm.runInContext(code, sb);
@@ -169,5 +169,66 @@ var resd = UC('Amex Gold', [
 t("dedup edit: no dup added", resd.added, []);
 t("dedup edit: one Uber Cash row", currentSheet._grid.filter(r => r[1] === 'Amex Gold' && r[2] === 'Uber Cash').length, 1);
 t("dedup edit: existing status preserved", (currentSheet._grid.find(r => r[0] === 'amex_uber') || [])[7], '2026-06');
+
+// ----- catalog freshness spine: header migration, header-based reads, stale-date parsing -----
+const GCD = sb.getCatalogData_, EH = sb.ensureHeaders_, MSV = sb.monthsSinceVerified_, CS = sb.catalogStale_;
+const CAT_H = ['Card','LastVerified','Benefit','Amount','Category','Reset','ReminderDays','SourceUrl','PeriodBasis','Notes'];
+// Catalog sheet stub: rows[0] is the header (row 1), rows[1..] are data; getRange is 1-indexed and
+// reads the header row too (unlike makeSheet, which models only data rows).
+function makeCatalogSheet(rows) {
+  var grid = rows.map(r => r.slice());
+  return {
+    getLastRow: () => grid.length,
+    getLastColumn: () => grid.reduce((m, r) => Math.max(m, r.length), 0),
+    getRange: function (row, col, nr, nc) { nr = nr || 1; nc = nc || 1; return {
+      getValues: function () { var o = []; for (var r = 0; r < nr; r++) { var ln = []; for (var c = 0; c < nc; c++) { var gg = grid[row - 1 + r]; ln.push(gg && gg[col - 1 + c] != null ? gg[col - 1 + c] : ''); } o.push(ln); } return o; },
+      setValues: function (v) { for (var r = 0; r < v.length; r++) { if (!grid[row - 1 + r]) grid[row - 1 + r] = []; for (var c = 0; c < v[r].length; c++) grid[row - 1 + r][col - 1 + c] = v[r][c]; } return this; },
+      setFontWeight: function () { return this; }, setFrozenRows: function () { return this; } }; },
+    setFrozenRows: function () { return this; }, autoResizeColumns: function () { return this; }, _grid: grid };
+}
+// ensureHeaders_: append missing columns to the right, preserve header + data, idempotent (PITFALLS #2)
+var catMig = makeCatalogSheet([
+  ['Card','LastVerified','Benefit','Amount','Category','Reset','ReminderDays'],
+  ['Amex Gold','2026-06','Uber Cash','$10','other','monthly',4],
+]);
+t("ensureHeaders appends missing", EH(catMig, CAT_H), CAT_H);
+t("ensureHeaders migrates header row", catMig._grid[0], CAT_H);
+t("ensureHeaders preserves data row", catMig._grid[1], ['Amex Gold','2026-06','Uber Cash','$10','other','monthly',4]);
+t("ensureHeaders idempotent", EH(catMig, CAT_H), CAT_H);
+// getCatalogData_ reads by header NAME: old 7-col parses with defaults
+currentCatalog = makeCatalogSheet([
+  ['Card','LastVerified','Benefit','Amount','Category','Reset','ReminderDays'],
+  ['Amex Gold','2026-06','Uber Cash','$10','other','monthly',4],
+]);
+var c7 = GCD().cards;
+t("catalog 7-col one card", c7.length, 1);
+t("catalog 7-col lastVerified", c7[0].lastVerified, '2026-06');
+t("catalog 7-col periodBasis default", c7[0].benefits[0].periodBasis, 'calendar');
+t("catalog 7-col sourceUrl default", c7[0].benefits[0].sourceUrl, '');
+// new 10-col parses the appended fields
+currentCatalog = makeCatalogSheet([
+  CAT_H.slice(),
+  ['CSR','2026-01','Annual travel','$300','travel','annual',30,'https://chase.com/x','anniversary','enroll first'],
+]);
+var c10 = GCD().cards;
+t("catalog 10-col sourceUrl", c10[0].benefits[0].sourceUrl, 'https://chase.com/x');
+t("catalog 10-col periodBasis", c10[0].benefits[0].periodBasis, 'anniversary');
+t("catalog 10-col notes", c10[0].benefits[0].notes, 'enroll first');
+t("catalog 10-col card sourceUrl propagated", c10[0].sourceUrl, 'https://chase.com/x');
+// header-based read is column-order independent
+currentCatalog = makeCatalogSheet([
+  ['Benefit','Card','PeriodBasis','Amount','Reset','Category','ReminderDays','Notes','LastVerified','SourceUrl'],
+  ['Annual travel','CSR','anniversary','$300','annual','travel',30,'note','2025-12','https://x'],
+]);
+var cR = GCD().cards;
+t("catalog reordered cols read by name", [cR[0].card, cR[0].benefits[0].periodBasis, cR[0].benefits[0].reset], ['CSR','anniversary','annual']);
+currentCatalog = null;
+// stale-date parsing: YYYY-MM and YYYY-MM-DD; unparseable/blank → not stale
+t("monthsSince YYYY-MM", MSV('2026-01', U(2026, 6, 18)), 5);
+t("monthsSince YYYY-MM-DD ignores day", MSV('2025-12-31', U(2026, 6, 18)), 6);
+t("monthsSince unparseable null", MSV('soon', U(2026, 6, 18)), null);
+t("catalogStale fresh (5mo) false", CS('2026-01', U(2026, 6, 18)), false);
+t("catalogStale old (6mo) true", CS('2025-12', U(2026, 6, 18)), true);
+t("catalogStale blank not flagged", CS('', U(2026, 6, 18)), false);
 console.log("logic asserts: " + pass + " passed, " + fail + " failed");
 if (fail || !okAll) process.exitCode = 1;
