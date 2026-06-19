@@ -21,9 +21,17 @@
   .sel,.txt{font:inherit;font-size:15px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%}
   .meta-row{display:flex;gap:14px;flex-wrap:wrap}
   .field-lbl{flex:1;min-width:140px}
-  .ann-row{display:flex;gap:8px}
+  .ann-row{display:flex;gap:5px}
   .ann-row select{flex:1;min-width:0}
   #cardOther{margin-top:10px}
+  /* Currency fields: $ prefix + a sane max width (fee/seed are plain numbers, not free text). */
+  .cur{position:relative;display:block;max-width:160px}
+  .cur::before{content:'$';position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:15px;pointer-events:none}
+  .cur .txt{padding-left:22px}
+  /* Inline info icon with a hover/tap tooltip (CSS-only, no JS). */
+  .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border:1px solid var(--muted);border-radius:50%;font-size:10px;font-style:normal;color:var(--muted);cursor:help;margin-left:5px;position:relative;vertical-align:middle}
+  .info .tip{display:none;position:absolute;bottom:135%;left:0;width:230px;max-width:62vw;background:var(--text);color:#fff;font-size:12px;font-weight:400;line-height:1.45;padding:8px 10px;border-radius:6px;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+  .info:hover .tip,.info:focus .tip{display:block}
   .verified{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.45}
   .verified a{color:var(--blue);text-decoration:none}
   .verified a:hover{text-decoration:underline}
@@ -93,7 +101,7 @@
     <div class="card" id="metaCard" style="display:none">
       <div class="meta-row">
         <label class="field-lbl"><span class="lbl" id="feeLbl"></span>
-          <input class="txt" id="feeInput" type="number" min="0" step="1" inputmode="decimal"></label>
+          <span class="cur"><input class="txt" id="feeInput" type="number" min="0" step="1" inputmode="decimal"></span></label>
         <div class="field-lbl">
           <span class="lbl" id="annLbl"></span>
           <div class="ann-row">
@@ -103,10 +111,9 @@
         </div>
       </div>
       <div class="meta-row" style="margin-top:14px">
-        <label class="field-lbl"><span class="lbl" id="seedLbl"></span>
-          <input class="txt" id="seedInput" type="number" min="0" step="1" inputmode="decimal"></label>
+        <label class="field-lbl"><span class="lbl"><span id="seedLbl"></span><span class="info" id="seedInfo" tabindex="0" role="button" aria-label="info">i<span class="tip" id="seedTip"></span></span></span>
+          <span class="cur"><input class="txt" id="seedInput" type="number" min="0" step="1" inputmode="decimal"></span></label>
       </div>
-      <div class="verified" id="seedHelp"></div>
     </div>
 
     <div class="hint" id="hint"></div>
@@ -154,7 +161,7 @@
   function renderFreshness(c){
     var su = c ? safeUrl(c.sourceUrl) : '';
     if(!c || (!c.lastVerified && !su && !c.stale)){ verified.style.display='none'; return; }
-    var html = c.lastVerified ? escHtml(fmt(UI.verified,{date:c.lastVerified})) : '';
+    var html = c.lastVerifiedLabel ? escHtml(fmt(UI.verified,{date:c.lastVerifiedLabel})) : '';
     if(su) html += (html?' · ':'') + '<a href="'+escHtml(su)+'" target="_blank" rel="noopener noreferrer">'+escHtml(UI.source)+' ↗</a>';
     if(c.stale) html += (html?' · ':'') + '<span class="stale-flag">'+escHtml(UI.reviewRecommended)+'</span>';
     verified.innerHTML = html; verified.style.display='';
@@ -176,7 +183,7 @@
   document.getElementById('feeLbl').textContent = UI.annualFeeLabel;
   document.getElementById('annLbl').textContent = UI.anniversaryLabel;
   document.getElementById('seedLbl').textContent = UI.realizedSeedLabel;
-  document.getElementById('seedHelp').textContent = UI.realizedSeedHelp;
+  document.getElementById('seedTip').textContent = UI.realizedSeedHelp;
   document.getElementById('feeInput').placeholder = UI.annualFeePlaceholder;
 
   // Annual fee + anniversary (month/day, no year) + realized-seed inputs — the realized-value bar.
@@ -345,6 +352,27 @@
       var f=row._fields; if(f.chk.checked && !f.name.value.trim()) return true; }
     return false;
   }
+  // First benefit name (case-insensitive) that appears twice among the checked rows — so the user
+  // renames the collision instead of one row being silently dropped on save (server dedups by name).
+  function firstDuplicateName(items){
+    var seen={};
+    for(var i=0;i<items.length;i++){
+      var k=String(items[i].benefit||'').toLowerCase().trim();
+      if(!k) continue;
+      if(seen[k]) return items[i].benefit;
+      seen[k]=true;
+    }
+    return '';
+  }
+  function focusBenefitRow(name){
+    var key=String(name||'').toLowerCase().trim(), match=null;
+    Array.prototype.forEach.call(benefitsBox.querySelectorAll('.ben'), function(row){
+      if(row.classList.contains('removed')) return;
+      var f=row._fields;
+      if(f && f.chk.checked && f.name.value.toLowerCase().trim()===key) match=row;  // last match = the duplicate
+    });
+    if(match){ match._fields.name.focus(); match._fields.name.select(); }
+  }
 
   sel.addEventListener('change', function(){ showFormFor(sel.value); });
   document.getElementById('addBenefit').addEventListener('click', function(){
@@ -381,6 +409,8 @@
     if(!card){ showErr(UI.needCardName); return; }
     var items=collectItems();
     if(!items.length){ showErr(hasBlankCheckedRow()?UI.needName:UI.needOne); return; }
+    var dup=firstDuplicateName(items);
+    if(dup){ showErr(fmt(UI.duplicateName,{name:dup})); focusBenefitRow(dup); return; }
     // A card with an annual fee must have its anniversary set — the realized-value period and any
     // anniversary-basis resets depend on it. No-fee / "Other" cards keep it optional.
     if(Number(feeInput.value) > 0 && !getAnniversary()){ showErr(UI.needAnniversary); annMonth.focus(); return; }

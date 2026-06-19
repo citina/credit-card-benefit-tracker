@@ -31,6 +31,7 @@ const MM = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','D
 function fmt(d, _t, f) { const Y = d.getUTCFullYear(), M = d.getUTCMonth() + 1, D = d.getUTCDate();
   if (f === 'yyyy') return '' + Y; if (f === 'MM') return p2(M); if (f === 'dd') return p2(D); if (f === 'yyyy-MM') return Y + '-' + p2(M);
   if (f === 'yyyy-MM-dd') return Y + '-' + p2(M) + '-' + p2(D); if (f === 'MMM d') return MM[M - 1] + ' ' + D;
+  if (f === 'MMM yyyy') return MM[M - 1] + ' ' + Y; if (f === 'MMM d, yyyy') return MM[M - 1] + ' ' + D + ', ' + Y;
   if (f === 'M月d日') return M + '月' + D + '日'; return Y + '-' + p2(M) + '-' + p2(D); }
 let currentSheet = null, currentCards = null, currentCatalog = null;
 const sb = {
@@ -223,6 +224,15 @@ t("catalog 10-col sourceUrl", c10[0].benefits[0].sourceUrl, 'https://chase.com/x
 t("catalog 10-col periodBasis", c10[0].benefits[0].periodBasis, 'anniversary');
 t("catalog 10-col notes", c10[0].benefits[0].notes, 'enroll first');
 t("catalog 10-col card sourceUrl propagated", c10[0].sourceUrl, 'https://chase.com/x');
+t("catalog 10-col card lastVerifiedLabel", c10[0].lastVerifiedLabel, 'Jan 2026');
+// a LastVerified cell coerced to a Date by Sheets still normalizes + labels
+currentCatalog = makeCatalogSheet([
+  CAT_H.slice(),
+  ['Amex Gold', U(2026, 1, 1), 'Uber Cash', '$10', 'other', 'monthly', 4, '', 'calendar', ''],
+]);
+var cDate = GCD().cards;
+t("catalog coerced-Date canonical", cDate[0].lastVerified, '2026-01');
+t("catalog coerced-Date label", cDate[0].lastVerifiedLabel, 'Jan 2026');
 // header-based read is column-order independent
 currentCatalog = makeCatalogSheet([
   ['Benefit','Card','PeriodBasis','Amount','Reset','Category','ReminderDays','Notes','LastVerified','SourceUrl'],
@@ -231,9 +241,19 @@ currentCatalog = makeCatalogSheet([
 var cR = GCD().cards;
 t("catalog reordered cols read by name", [cR[0].card, cR[0].benefits[0].periodBasis, cR[0].benefits[0].reset], ['CSR','anniversary','annual']);
 currentCatalog = null;
-// stale-date parsing: YYYY-MM and YYYY-MM-DD; unparseable/blank → not stale
+// verifiedKey_ / verifiedLabel_: robust to Sheets coercing 'YYYY-MM' into a Date
+const VK = sb.verifiedKey_, VL = sb.verifiedLabel_;
+t("verifiedKey passes string", VK('2026-06'), '2026-06');
+t("verifiedKey from Date → yyyy-MM", VK(U(2026, 6, 1)), '2026-06');
+t("verifiedKey invalid → blank", VK('soon'), '');
+t("verifiedLabel YYYY-MM", VL('2026-06'), 'Jun 2026');
+t("verifiedLabel YYYY-MM-DD adds day", VL('2026-06-01'), 'Jun 1, 2026');
+t("verifiedLabel from Date", VL(U(2026, 6, 1)), 'Jun 2026');
+t("verifiedLabel blank", VL(''), '');
+// stale-date parsing: YYYY-MM and YYYY-MM-DD; coerced Date; unparseable/blank → not stale
 t("monthsSince YYYY-MM", MSV('2026-01', U(2026, 6, 18)), 5);
 t("monthsSince YYYY-MM-DD ignores day", MSV('2025-12-31', U(2026, 6, 18)), 6);
+t("monthsSince from coerced Date", MSV(U(2025, 12, 1), U(2026, 6, 18)), 6);
 t("monthsSince unparseable null", MSV('soon', U(2026, 6, 18)), null);
 t("catalogStale fresh (5mo) false", CS('2026-01', U(2026, 6, 18)), false);
 t("catalogStale old (6mo) true", CS('2025-12', U(2026, 6, 18)), true);

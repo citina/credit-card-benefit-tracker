@@ -191,9 +191,10 @@ const STRINGS = {
     addCardPlaceholder: 'Choose a card…',
     addCardOther: 'Other (type a name)',
     addCardNamePlaceholder: 'Card name',
-    addVerified: 'Benefits verified as of {date}. Verify current terms with your issuer.',
+    addVerified: 'Last verified: {date}. Terms may vary by issuer.',
     addSource: 'Source',
     addReviewRecommended: 'Review recommended',
+    addDuplicateName: 'Two benefits have the same name: "{name}". Rename one to continue.',
     addColBenefit: 'Benefit',
     addColAmount: 'Amount',
     addColCategory: 'Category',
@@ -203,7 +204,7 @@ const STRINGS = {
     annualFeeLabel: 'Annual fee',
     anniversaryLabel: 'Card anniversary',
     annualFeePlaceholder: 'e.g. 95',
-    realizedSeedLabel: 'Already used this year ($)',
+    realizedSeedLabel: 'Already used this year',
     realizedSeedHelp: 'Value used before tracking; in-app marks add on top. Resets at your anniversary.',
     addAnotherBenefit: '+ Add another benefit',
     addSubmit: 'Add to my tracker',
@@ -297,9 +298,10 @@ const STRINGS = {
     addCardPlaceholder: '选择一张卡…',
     addCardOther: '其他(手动输入)',
     addCardNamePlaceholder: '卡片名称',
-    addVerified: '权益数据核实于 {date}。请以发卡机构最新条款为准。',
+    addVerified: '上次核实:{date}。条款以发卡机构为准。',
     addSource: '来源',
     addReviewRecommended: '建议复核',
+    addDuplicateName: '有两项权益同名:「{name}」。请改一个名字再继续。',
     addColBenefit: '权益',
     addColAmount: '金额',
     addColCategory: '类别',
@@ -309,7 +311,7 @@ const STRINGS = {
     annualFeeLabel: '年费',
     anniversaryLabel: '卡片周年日',
     annualFeePlaceholder: '例如 95',
-    realizedSeedLabel: '本年度已实现 ($)',
+    realizedSeedLabel: '本年度已实现',
     realizedSeedHelp: '进入追踪前已用掉的价值;之后在 app 里标记的会累加在上面,周年日自动清零。',
     addAnotherBenefit: '+ 添加其他权益',
     addSubmit: '添加到我的追踪',
@@ -451,6 +453,9 @@ function setupCatalog() {
                  b.sourceUrl || entry.sourceUrl || '', b.periodBasis || 'calendar', b.notes || '']);
     });
   });
+  // LastVerified is plain-text so Sheets doesn't coerce 'YYYY-MM' into a Date (getCatalogData_ reads
+  // it back as a string; coerced cells are still handled by verifiedKey_). Set before writing values.
+  sheet.getRange(2, 2, rows.length - 1, 1).setNumberFormat('@');
   sheet.getRange(1, 1, rows.length, CATALOG_HEADERS.length).setValues(rows);
   sheet.getRange(1, 1, 1, CATALOG_HEADERS.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
@@ -855,14 +860,34 @@ function validCategory_(c) {
   return CATEGORIES.indexOf(v) !== -1 ? v : 'other';
 }
 
-// Whole months between a 'YYYY-MM' / 'YYYY-MM-DD' LastVerified and `now`; null if unparseable.
-// Day is ignored (row-level freshness is month-grained). Shared by the wizard's staleness warning
-// and reviewStaleCatalog(). Pure (tz via stubs) so verify can pin it.
+// A catalog LastVerified cell can be a 'YYYY-MM' / 'YYYY-MM-DD' string OR — if Sheets coerced it
+// (the column isn't plain-text) — a Date. Normalize to the canonical string key ('' when
+// unrecognized) so display + staleness are robust to coercion.
+function verifiedKey_(v) {
+  // toString tag, not `instanceof Date` — robust across execution realms (and the verify vm context).
+  if (Object.prototype.toString.call(v) === '[object Date]') return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM');
+  const s = String(v == null ? '' : v).trim();
+  return /^\d{4}-\d{2}(-\d{2})?$/.test(s) ? s : '';
+}
+// Friendly label for a verified value: 'YYYY-MM' → "Jun 2026" / "2026年6月"; 'YYYY-MM-DD' adds the
+// day. '' when unrecognized. Built UTC-noon so script-tz formatting never slips a month.
+function verifiedLabel_(v) {
+  const key = verifiedKey_(v);
+  const m = key.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!m) return '';
+  const y = Number(m[1]), mo = Number(m[2]), d = m[3] ? Number(m[3]) : 0;
+  if (CONFIG.LANG === 'zh') return d ? (y + '年' + mo + '月' + d + '日') : (y + '年' + mo + '月');
+  const date = new Date(Date.UTC(y, mo - 1, d || 1, 12));
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), d ? 'MMM d, yyyy' : 'MMM yyyy');
+}
+
+// Whole months between a 'YYYY-MM' / 'YYYY-MM-DD' (or coerced-Date) LastVerified and `now`; null if
+// unparseable. Day is ignored (row-level freshness is month-grained). Shared by the wizard's
+// staleness warning and reviewStaleCatalog(). Pure (tz via stubs) so verify can pin it.
 function monthsSinceVerified_(lastVerified, now) {
-  const m = String(lastVerified == null ? '' : lastVerified).trim().match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  const m = verifiedKey_(lastVerified).match(/^(\d{4})-(\d{2})/);
   if (!m) return null;
   const y = Number(m[1]), mo = Number(m[2]);
-  if (mo < 1 || mo > 12) return null;
   const tz = Session.getScriptTimeZone();
   const nowY = Number(Utilities.formatDate(now, tz, 'yyyy'));
   const nowMo = Number(Utilities.formatDate(now, tz, 'MM'));
@@ -895,10 +920,10 @@ function getCatalogData_() {
       const card = String(col(v, 'Card') || '').trim();
       const benefit = String(col(v, 'Benefit') || '').trim();
       if (!card || !benefit) return;  // skip blank/partial rows
-      const lastVerified = String(col(v, 'LastVerified') || '');
+      const lastVerified = verifiedKey_(col(v, 'LastVerified'));  // Date-coercion safe
       const sourceUrl = String(col(v, 'SourceUrl') || '').trim();
-      if (!byCard[card]) { byCard[card] = { card: card, lastVerified: lastVerified, sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
-      if (!byCard[card].lastVerified && lastVerified) byCard[card].lastVerified = lastVerified;  // first non-blank wins
+      if (!byCard[card]) { byCard[card] = { card: card, lastVerified: lastVerified, lastVerifiedLabel: verifiedLabel_(lastVerified), sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
+      if (!byCard[card].lastVerified && lastVerified) { byCard[card].lastVerified = lastVerified; byCard[card].lastVerifiedLabel = verifiedLabel_(lastVerified); }  // first non-blank wins
       if (!byCard[card].sourceUrl && sourceUrl) byCard[card].sourceUrl = sourceUrl;
       byCard[card].benefits.push({
         benefit: benefit,
@@ -921,6 +946,7 @@ function getCatalogData_() {
       return {
         card: card,
         lastVerified: entry.lastVerified,
+        lastVerifiedLabel: verifiedLabel_(entry.lastVerified),
         sourceUrl: entry.sourceUrl || '',
         benefits: entry.benefits.map(function (b) {
           return { benefit: b.benefit, amount: b.amount, category: validCategory_(b.category),
@@ -959,8 +985,8 @@ function getCardRows_(card) {
   const effSeed = (String(m.realizedSeedPeriod) === String(afYear)) ? m.realizedSeed : 0;
   // Catalog freshness for this card, surfaced in the edit form (same note as add mode).
   const fresh = cat
-    ? { lastVerified: cat.lastVerified, sourceUrl: cat.sourceUrl, stale: catalogStale_(cat.lastVerified, now) }
-    : { lastVerified: '', sourceUrl: '', stale: false };
+    ? { lastVerified: cat.lastVerified, lastVerifiedLabel: cat.lastVerifiedLabel, sourceUrl: cat.sourceUrl, stale: catalogStale_(cat.lastVerified, now) }
+    : { lastVerified: '', lastVerifiedLabel: '', sourceUrl: '', stale: false };
   return {
     card: cardName,
     freshness: fresh,
@@ -1170,7 +1196,7 @@ function catalogReviewHtml_(cards, now) {
     html += '<div style="border-top:1px solid #e6e4dc;padding:12px 0">';
     html += '<div style="font-size:15px;color:#1a1a18">' + esc_(c.card) + '</div>';
     html += '<div style="font-size:13px;color:#6b6a64">' +
-      esc_(fmt_(t_('catalogReviewVerified'), { date: c.lastVerified || '—', months: (months == null ? '?' : months) })) + '</div>';
+      esc_(fmt_(t_('catalogReviewVerified'), { date: c.lastVerifiedLabel || '—', months: (months == null ? '?' : months) })) + '</div>';
     const su = /^https?:\/\//i.test(String(c.sourceUrl || '')) ? c.sourceUrl : '';
     if (su) html += '<a href="' + esc_(su) + '" style="color:#185FA5;font-size:13px">' + esc_(t_('catalogReviewSource')) + ' →</a>';
     html += '</div>';
@@ -1654,6 +1680,7 @@ function addUiStrings_() {
     cardLabel: t_('addCardLabel'), cardPlaceholder: t_('addCardPlaceholder'),
     cardOther: t_('addCardOther'), cardNamePlaceholder: t_('addCardNamePlaceholder'),
     verified: t_('addVerified'), source: t_('addSource'), reviewRecommended: t_('addReviewRecommended'),
+    duplicateName: t_('addDuplicateName'),
     colBenefit: t_('addColBenefit'), colAmount: t_('addColAmount'),
     colCategory: t_('addColCategory'), colReset: t_('addColReset'),
     benefitNamePlaceholder: t_('addBenefitNamePlaceholder'), amountPlaceholder: t_('addAmountPlaceholder'),
