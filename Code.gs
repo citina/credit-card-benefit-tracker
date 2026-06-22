@@ -115,6 +115,37 @@ const CATALOG = {
       { benefit: 'Annual travel credit',             amount: '$300', category: 'travel',  reset: 'annual',     reminderDays: 30, periodBasis: 'anniversary' },
     ],
   },
+  // Added 2026-06-19 — verify amounts/fees against the issuer before relying on them.
+  'Capital One Venture X': {
+    lastVerified: '2026-06',
+    annualFee: 395,
+    benefits: [
+      // $300 travel credit via Capital One Travel; resets on the CARD ANNIVERSARY year (set the
+      // card's anniversary, like CSP/CSR). The 10k anniversary miles aren't a $ credit (excluded).
+      { benefit: 'Annual travel credit (Capital One Travel)', amount: '$300', category: 'travel', reset: 'annual', reminderDays: 30, periodBasis: 'anniversary' },
+    ],
+  },
+  'Marriott Bonvoy Brilliant': {
+    lastVerified: '2026-06',
+    annualFee: 650,
+    benefits: [
+      { benefit: 'Dining credit', amount: '$25', category: 'dining', reset: 'monthly', reminderDays: 7 },  // $25/month
+    ],
+  },
+  'Citi Strata Premier': {
+    lastVerified: '2026-06',
+    annualFee: 95,
+    benefits: [
+      { benefit: 'Annual hotel credit', amount: '$100', category: 'hotel', reset: 'annual', reminderDays: 30 },  // one hotel stay of $500+
+    ],
+  },
+  'Amex Green': {
+    lastVerified: '2026-06',
+    annualFee: 150,
+    benefits: [
+      { benefit: 'CLEAR Plus credit', amount: '$209', category: 'travel', reset: 'annual', reminderDays: 30 },
+    ],
+  },
 };
 // Appended columns (SourceUrl/PeriodBasis/Notes) are migrated onto existing sheets by ensureHeaders_
 // (PITFALLS #2 — append only, never reorder). getCatalogData_ reads by header NAME, so old 7-column
@@ -436,14 +467,52 @@ function ensureHeaders_(sheet, headers) {
   return cur.concat(missing);
 }
 
+// Append any CATALOG (constant) card+benefit rows that aren't already in the sheet, matched by
+// card+benefit name (case-insensitive). Append-only — never edits/reorders existing rows (PITFALLS
+// #2) — so a re-run after shipping new cards adds them without disturbing user edits. Writes each
+// value by HEADER NAME (column order independent). Note: a catalog row the user deliberately deleted
+// will be re-added on the next setup() (acceptable for a personal tool).
+function appendMissingCatalog_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  const idx = {}; header.forEach(function (h, i) { if (idx[h] == null) idx[h] = i; });
+  if (idx['Card'] == null || idx['Benefit'] == null) return;  // unexpected header → don't touch
+  const have = {};
+  if (sheet.getLastRow() >= 2) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues().forEach(function (v) {
+      const card = String(v[idx['Card']] || '').trim(), benefit = String(v[idx['Benefit']] || '').trim();
+      if (card && benefit) have[dedupKey_(card, benefit)] = true;
+    });
+  }
+  const newRows = [];
+  Object.keys(CATALOG).forEach(function (card) {
+    const entry = CATALOG[card];
+    entry.benefits.forEach(function (b) {
+      if (have[dedupKey_(card, b.benefit)]) return;
+      const row = [];
+      for (let i = 0; i < lastCol; i++) row.push('');
+      const put = function (name, val) { if (idx[name] != null) row[idx[name]] = val; };
+      put('Card', card); put('LastVerified', entry.lastVerified); put('Benefit', b.benefit);
+      put('Amount', b.amount); put('Category', b.category); put('Reset', b.reset);
+      put('ReminderDays', b.reminderDays); put('SourceUrl', b.sourceUrl || entry.sourceUrl || '');
+      put('PeriodBasis', b.periodBasis || 'calendar'); put('Notes', b.notes || '');
+      newRows.push(row);
+    });
+  });
+  if (!newRows.length) return;
+  const start = sheet.getLastRow() + 1;
+  if (idx['LastVerified'] != null) sheet.getRange(start, idx['LastVerified'] + 1, newRows.length, 1).setNumberFormat('@');
+  sheet.getRange(start, 1, newRows.length, lastCol).setValues(newRows);
+}
+
 // Create + seed the editable Catalog sheet from the CATALOG constant. If it already exists (the user
-// may have edited it), only append any missing columns (SourceUrl/PeriodBasis/Notes migration) —
-// existing rows/values are preserved. SourceUrl/Notes seed blank (filled by the user); PeriodBasis
-// seeds from the constant so anniversary-basis benefits carry their flag.
+// may have edited it), append any missing columns (SourceUrl/PeriodBasis/Notes migration) AND any
+// newly-shipped cards/benefits — existing rows/values are preserved. SourceUrl/Notes seed blank
+// (filled by the user); PeriodBasis seeds from the constant so anniversary-basis benefits carry it.
 function setupCatalog() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const existing = ss.getSheetByName(CONFIG.CATALOG_SHEET);
-  if (existing) { ensureHeaders_(existing, CATALOG_HEADERS); return; }
+  if (existing) { ensureHeaders_(existing, CATALOG_HEADERS); appendMissingCatalog_(existing); return; }
   const sheet = ss.insertSheet(CONFIG.CATALOG_SHEET);
   const rows = [CATALOG_HEADERS];
   Object.keys(CATALOG).forEach(function (card) {

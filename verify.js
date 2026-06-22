@@ -192,7 +192,7 @@ function makeCatalogSheet(rows) {
     getRange: function (row, col, nr, nc) { nr = nr || 1; nc = nc || 1; return {
       getValues: function () { var o = []; for (var r = 0; r < nr; r++) { var ln = []; for (var c = 0; c < nc; c++) { var gg = grid[row - 1 + r]; ln.push(gg && gg[col - 1 + c] != null ? gg[col - 1 + c] : ''); } o.push(ln); } return o; },
       setValues: function (v) { for (var r = 0; r < v.length; r++) { if (!grid[row - 1 + r]) grid[row - 1 + r] = []; for (var c = 0; c < v[r].length; c++) grid[row - 1 + r][col - 1 + c] = v[r][c]; } return this; },
-      setFontWeight: function () { return this; }, setFrozenRows: function () { return this; } }; },
+      setFontWeight: function () { return this; }, setFrozenRows: function () { return this; }, setNumberFormat: function () { return this; } }; },
     setFrozenRows: function () { return this; }, autoResizeColumns: function () { return this; }, _grid: grid };
 }
 // ensureHeaders_: append missing columns to the right, preserve header + data, idempotent (PITFALLS #2)
@@ -262,5 +262,16 @@ t("catalogStale blank not flagged", CS('', U(2026, 6, 18)), false);
 t("staleCatalogCards filters by date",
   sb.staleCatalogCards_([{ card: 'A', lastVerified: '2025-12' }, { card: 'B', lastVerified: '2026-06' }, { card: 'C', lastVerified: '' }], U(2026, 6, 18)).map(c => c.card),
   ['A']);
+// appendMissingCatalog_: re-running setup() adds newly-shipped catalog cards (append-only, idempotent)
+var apSheet = makeCatalogSheet([CAT_H.slice()]);  // header only
+sb.appendMissingCatalog_(apSheet);
+var apCards = apSheet._grid.slice(1).map(r => r[0]);
+t("appendMissingCatalog adds a new card", apCards.indexOf('Capital One Venture X') !== -1, true);
+var apN = apSheet._grid.length;
+sb.appendMissingCatalog_(apSheet);
+t("appendMissingCatalog idempotent", apSheet._grid.length, apN);
+var apSheet2 = makeCatalogSheet([CAT_H.slice(), ['Amex Gold', '2026-06', 'Uber Cash', '$10', 'other', 'monthly', 4, '', 'calendar', '']]);
+sb.appendMissingCatalog_(apSheet2);
+t("appendMissingCatalog keeps existing unique", apSheet2._grid.slice(1).filter(r => r[0] === 'Amex Gold' && r[2] === 'Uber Cash').length, 1);
 console.log("logic asserts: " + pass + " passed, " + fail + " failed");
 if (fail || !okAll) process.exitCode = 1;
