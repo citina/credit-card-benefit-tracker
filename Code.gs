@@ -64,7 +64,7 @@ const CATEGORIES = ['travel', 'dining', 'hotel', 'streaming', 'grocery', 'lounge
 // wizard shows lastVerified + a "verify with your issuer" note, and manual-add covers the rest.
 const CATALOG = {
   'Chase Sapphire Preferred': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 95,
     benefits: [
       // Chase Travel hotel credit doubled to $100/anniversary year effective 2026-06-15.
@@ -76,7 +76,7 @@ const CATALOG = {
     ],
   },
   'Amex Gold': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 325,
     benefits: [
       { benefit: 'Uber Cash',     amount: '$10', category: 'other',  reset: 'monthly',    reminderDays: 4 },
@@ -86,7 +86,7 @@ const CATALOG = {
     ],
   },
   'Amex Platinum': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 695,
     benefits: [
       { benefit: 'Uber Cash',                       amount: '$15',    category: 'other',     reset: 'monthly',    reminderDays: 4 },  // +$20 bonus in December
@@ -101,7 +101,7 @@ const CATALOG = {
     ],
   },
   'Chase Sapphire Reserve': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 795,
     benefits: [
       { benefit: 'Dining credit (Exclusive Tables)', amount: '$150', category: 'dining',  reset: 'semiannual', reminderDays: 21 }, // OpenTable; $150 H1 + $150 H2
@@ -117,7 +117,7 @@ const CATALOG = {
   },
   // Added 2026-06-19 — verify amounts/fees against the issuer before relying on them.
   'Capital One Venture X': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 395,
     benefits: [
       // $300 travel credit via Capital One Travel; resets on the CARD ANNIVERSARY year (set the
@@ -126,21 +126,21 @@ const CATALOG = {
     ],
   },
   'Marriott Bonvoy Brilliant': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 650,
     benefits: [
       { benefit: 'Dining credit', amount: '$25', category: 'dining', reset: 'monthly', reminderDays: 7 },  // $25/month
     ],
   },
   'Citi Strata Premier': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 95,
     benefits: [
       { benefit: 'Annual hotel credit', amount: '$100', category: 'hotel', reset: 'annual', reminderDays: 30 },  // one hotel stay of $500+
     ],
   },
   'Amex Green': {
-    lastVerified: '2026-06',
+    lastVerified: '2026-06-19',
     annualFee: 150,
     benefits: [
       { benefit: 'CLEAR Plus credit', amount: '$209', category: 'travel', reset: 'annual', reminderDays: 30 },
@@ -503,6 +503,34 @@ function appendMissingCatalog_(sheet) {
   const start = sheet.getLastRow() + 1;
   if (idx['LastVerified'] != null) sheet.getRange(start, idx['LastVerified'] + 1, newRows.length, 1).setNumberFormat('@');
   sheet.getRange(start, 1, newRows.length, lastCol).setValues(newRows);
+}
+
+// OPT-IN, run once from the editor: upgrade month-only LastVerified cells in an existing Catalog
+// sheet to the constant's day-precise date (so the wizard freshness line shows the day). Guarded by
+// verifiedDayUpgrade_ — only rewrites a month-only cell whose month matches the constant's, never a
+// cell with a hand-entered day, a different month, or a card not in the constant. Idempotent; writes
+// plain-text so it never re-coerces. Editor-run like setup() (not web-callable). Returns # changed.
+function restampCatalogDay() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.CATALOG_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  const idx = {}; header.forEach(function (h, i) { if (idx[h] == null) idx[h] = i; });
+  if (idx['Card'] == null || idx['LastVerified'] == null) return 0;
+  const lvCol = idx['LastVerified'];
+  const n = sheet.getLastRow() - 1;
+  const values = sheet.getRange(2, 1, n, lastCol).getValues();
+  let changed = 0;
+  for (let i = 0; i < n; i++) {
+    const card = String(values[i][idx['Card']] || '').trim();
+    const entry = CATALOG[card];
+    if (!entry || !entry.lastVerified) continue;                 // unknown card → nothing to upgrade to
+    const next = verifiedDayUpgrade_(values[i][lvCol], entry.lastVerified);
+    if (!next) continue;
+    sheet.getRange(i + 2, lvCol + 1, 1, 1).setNumberFormat('@').setValues([[next]]);
+    changed++;
+  }
+  return changed;
 }
 
 // Create + seed the editable Catalog sheet from the CATALOG constant. If it already exists (the user
@@ -950,6 +978,19 @@ function verifiedLabel_(v) {
   return Utilities.formatDate(date, Session.getScriptTimeZone(), d ? 'MMM d, yyyy' : 'MMM yyyy');
 }
 
+// Decide whether to upgrade a LastVerified cell from month-only to the constant's day-precise date.
+// Returns the full 'YYYY-MM-DD' to write, or '' to leave the cell as-is. Upgrades ONLY when the cell
+// normalizes to a month-only key ('YYYY-MM', incl. a Sheets-coerced Date) AND that month equals the
+// constant's month — so a user's hand-entered day or a different month is never overwritten. Pure;
+// idempotent (a cell that already has a day → ''). Used by the opt-in restampCatalogDay() migration.
+function verifiedDayUpgrade_(cellValue, fullDate) {
+  const full = verifiedKey_(fullDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(full)) return '';   // constant must itself be day-precise
+  const key = verifiedKey_(cellValue);
+  if (!/^\d{4}-\d{2}$/.test(key)) return '';           // blank / unparseable / already has a day → leave it
+  return key === full.slice(0, 7) ? full : '';         // same month → upgrade; different month → leave it
+}
+
 // Whole months between a 'YYYY-MM' / 'YYYY-MM-DD' (or coerced-Date) LastVerified and `now`; null if
 // unparseable. Day is ignored (row-level freshness is month-grained). Shared by the wizard's
 // staleness warning and reviewStaleCatalog(). Pure (tz via stubs) so verify can pin it.
@@ -991,7 +1032,7 @@ function getCatalogData_() {
       if (!card || !benefit) return;  // skip blank/partial rows
       const lastVerified = verifiedKey_(col(v, 'LastVerified'));  // Date-coercion safe
       const sourceUrl = String(col(v, 'SourceUrl') || '').trim();
-      if (!byCard[card]) { byCard[card] = { card: card, lastVerified: lastVerified, lastVerifiedLabel: verifiedLabel_(lastVerified), sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
+      if (!byCard[card]) { byCard[card] = { card: card, annualFee: (CATALOG[card] ? Number(CATALOG[card].annualFee) || 0 : 0), lastVerified: lastVerified, lastVerifiedLabel: verifiedLabel_(lastVerified), sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
       if (!byCard[card].lastVerified && lastVerified) { byCard[card].lastVerified = lastVerified; byCard[card].lastVerifiedLabel = verifiedLabel_(lastVerified); }  // first non-blank wins
       if (!byCard[card].sourceUrl && sourceUrl) byCard[card].sourceUrl = sourceUrl;
       byCard[card].benefits.push({
@@ -1014,6 +1055,7 @@ function getCatalogData_() {
       const entry = CATALOG[card];
       return {
         card: card,
+        annualFee: Number(entry.annualFee) || 0,
         lastVerified: entry.lastVerified,
         lastVerifiedLabel: verifiedLabel_(entry.lastVerified),
         sourceUrl: entry.sourceUrl || '',

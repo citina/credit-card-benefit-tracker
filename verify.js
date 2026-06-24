@@ -212,6 +212,7 @@ currentCatalog = makeCatalogSheet([
 var c7 = GCD().cards;
 t("catalog 7-col one card", c7.length, 1);
 t("catalog 7-col lastVerified", c7[0].lastVerified, '2026-06');
+t("catalog 7-col annualFee from constant", c7[0].annualFee, 325);  // Amex Gold fee comes from CATALOG (sheet has no fee col)
 t("catalog 7-col periodBasis default", c7[0].benefits[0].periodBasis, 'calendar');
 t("catalog 7-col sourceUrl default", c7[0].benefits[0].sourceUrl, '');
 // new 10-col parses the appended fields
@@ -225,6 +226,7 @@ t("catalog 10-col periodBasis", c10[0].benefits[0].periodBasis, 'anniversary');
 t("catalog 10-col notes", c10[0].benefits[0].notes, 'enroll first');
 t("catalog 10-col card sourceUrl propagated", c10[0].sourceUrl, 'https://chase.com/x');
 t("catalog 10-col card lastVerifiedLabel", c10[0].lastVerifiedLabel, 'Jan 2026');
+t("catalog unknown card annualFee 0", c10[0].annualFee, 0);  // 'CSR' isn't a CATALOG key → fee defaults to 0
 // a LastVerified cell coerced to a Date by Sheets still normalizes + labels
 currentCatalog = makeCatalogSheet([
   CAT_H.slice(),
@@ -241,6 +243,10 @@ currentCatalog = makeCatalogSheet([
 var cR = GCD().cards;
 t("catalog reordered cols read by name", [cR[0].card, cR[0].benefits[0].periodBasis, cR[0].benefits[0].reset], ['CSR','anniversary','annual']);
 currentCatalog = null;
+// fallback path (no Catalog sheet): cards come from the CATALOG constant — each carries a numeric annualFee
+var cFallback = GCD().cards;
+t("catalog fallback every card has numeric annualFee", cFallback.every(c => typeof c.annualFee === 'number'), true);
+t("catalog fallback Amex Gold fee", (cFallback.find(c => c.card === 'Amex Gold') || {}).annualFee, 325);
 // verifiedKey_ / verifiedLabel_: robust to Sheets coercing 'YYYY-MM' into a Date
 const VK = sb.verifiedKey_, VL = sb.verifiedLabel_;
 t("verifiedKey passes string", VK('2026-06'), '2026-06');
@@ -250,6 +256,34 @@ t("verifiedLabel YYYY-MM", VL('2026-06'), 'Jun 2026');
 t("verifiedLabel YYYY-MM-DD adds day", VL('2026-06-01'), 'Jun 1, 2026');
 t("verifiedLabel from Date", VL(U(2026, 6, 1)), 'Jun 2026');
 t("verifiedLabel blank", VL(''), '');
+// verifiedDayUpgrade_: month-only → constant's day, guarded (never clobbers a hand-entered day / other month)
+const VDU = sb.verifiedDayUpgrade_;
+t("upgrade month-only → full day", VDU('2026-06', '2026-06-19'), '2026-06-19');
+t("upgrade preserves existing day", VDU('2026-06-15', '2026-06-19'), '');
+t("upgrade skips different month", VDU('2026-07', '2026-06-19'), '');
+t("upgrade skips blank", VDU('', '2026-06-19'), '');
+t("upgrade skips unparseable", VDU('soon', '2026-06-19'), '');
+t("upgrade coerced-Date month-only → full", VDU(U(2026, 6, 1), '2026-06-19'), '2026-06-19');
+t("upgrade idempotent (already day)", VDU('2026-06-19', '2026-06-19'), '');
+t("upgrade needs day-precise constant", VDU('2026-06', '2026-06'), '');
+// restampCatalogDay(): in-place upgrade of an existing sheet — only matching month-only cells, never user days / unknown cards
+currentCatalog = makeCatalogSheet([
+  CAT_H.slice(),
+  ['Amex Gold', '2026-06', 'Uber Cash', '$10', 'other', 'monthly', 4, '', 'calendar', ''],          // month-only → upgrades
+  ['Amex Gold', '2026-06-15', 'Dining credit', '$10', 'dining', 'monthly', 7, '', 'calendar', ''],   // hand-entered day → preserved
+  ['Totally Unknown Card', '2026-06', 'X', '$5', 'other', 'monthly', 7, '', 'calendar', ''],          // not in CATALOG → skipped
+]);
+const restampN = sb.restampCatalogDay();
+t("restamp count", restampN, 1);
+t("restamp upgrades month-only", currentCatalog._grid[1][1], '2026-06-19');
+t("restamp preserves user day", currentCatalog._grid[2][1], '2026-06-15');
+t("restamp skips unknown card", currentCatalog._grid[3][1], '2026-06');
+t("restamp idempotent (2nd run no-op)", sb.restampCatalogDay(), 0);
+currentCatalog = null;
+// shipped CATALOG constant is now day-precise everywhere (verified via the fallback path)
+var cDay = GCD().cards;
+t("catalog constant all day-precise", cDay.every(c => /^\d{4}-\d{2}-\d{2}$/.test(c.lastVerified)), true);
+t("catalog constant label shows day", (cDay.find(c => c.card === 'Amex Gold') || {}).lastVerifiedLabel, 'Jun 19, 2026');
 // stale-date parsing: YYYY-MM and YYYY-MM-DD; coerced Date; unparseable/blank → not stale
 t("monthsSince YYYY-MM", MSV('2026-01', U(2026, 6, 18)), 5);
 t("monthsSince YYYY-MM-DD ignores day", MSV('2025-12-31', U(2026, 6, 18)), 6);

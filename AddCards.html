@@ -325,7 +325,7 @@
       cardOther.style.display='none';
       var c=CARDS[value];
       renderFreshness(c);   // verified-as-of + optional Source link + Review-recommended flag
-      showMeta(META[cardKey(value)], false);   // prefill the seeded annual-fee default (no seed in add mode)
+      showMeta(META[cardKey(value)] || { annualFee:(c&&c.annualFee)||0 }, false);   // prefill saved fee, else catalog default (no seed in add mode)
       (c?c.benefits:[]).forEach(function(b){ benefitsBox.appendChild(makeRow(b, false, 'none')); });  // opt-in: tick to add, no ×
     }
   }
