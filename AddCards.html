@@ -223,7 +223,8 @@
   // --- card selector ---
   var sel = document.getElementById('cardSel');
   sel.appendChild(opt('', UI.cardPlaceholder));
-  CATALOG.cards.forEach(function(c){ sel.appendChild(opt(c.card, c.card)); });
+  CATALOG.cards.slice().sort(function(a,b){ return String(a.card).toLowerCase().localeCompare(String(b.card).toLowerCase()); })
+    .forEach(function(c){ sel.appendChild(opt(c.card, c.card)); });   // alphabetical card list (placeholder stays first, Other last)
   sel.appendChild(opt('__other__', UI.cardOther));
 
   var benefitsBox = document.getElementById('benefits');
