@@ -33,10 +33,17 @@ const COL = {
   RESET: 6, REMINDER_DAYS: 7, LAST_DONE_PERIOD: 8,
   LAST_REMINDED: 9, SNOOZE_UNTIL: 10,
   REALIZED_VALUE: 11, REALIZED_PERIOD: 12,
+  // Appended 2026-06-24 (PITFALLS #2/#3 — append-only, every write widened to HEADERS.length):
+  //   PeriodBasis — persisted issuer basis 'anniversary'|'calendar'|'' (#C). Blank ⇒ derive by name
+  //                 (benefitPeriodBasis_), so a renamed benefit no longer loses its anniversary basis.
+  //   UsedValue   — $ realized in the CURRENT sub-period (set by done = full, or a partial/value-on-use
+  //                 entry). Lets a partial be revised and a value-on-use done be reversed (#I/#J).
+  //   UsedPeriod  — the sub-period key (periodKey_, e.g. "2026-06") UsedValue belongs to. Plain-text.
+  PERIOD_BASIS: 13, USED_VALUE: 14, USED_PERIOD: 15,
 };
 const HEADERS = ['ID', 'Card', 'Benefit', 'Amount', 'Category', 'Reset',
                  'ReminderDays', 'LastDonePeriod', 'LastReminded', 'SnoozeUntil',
-                 'RealizedValue', 'RealizedPeriod'];
+                 'RealizedValue', 'RealizedPeriod', 'PeriodBasis', 'UsedValue', 'UsedPeriod'];
 // Per-card sheet for the realized-value bar:
 //   AnnualFee          — the fee the bar measures value against
 //   Anniversary        — the card's renewal month/day 'MM-DD' (anchors the annual-fee period AND
@@ -176,7 +183,10 @@ const STRINGS = {
     snoozedUntil: 'Snoozed until {date}',
     expiryInfo: '{n}d left · expires {date}',
     expiryToday: 'expires today',
+    usedInfo: 'used {used} of {full}',
     markDone: 'Mark done',
+    logUsed: 'Log $ used',
+    valuePh: 'value',
     snooze: 'Snooze',
     undo: 'Undo',
     unsnooze: 'Un-snooze',
@@ -285,7 +295,10 @@ const STRINGS = {
     snoozedUntil: '已推迟至 {date}',
     expiryInfo: '还剩 {n} 天 · {date} 到期',
     expiryToday: '今天到期',
+    usedInfo: '已用 {used} / {full}',
     markDone: '标记已用',
+    logUsed: '记部分',
+    valuePh: '实际价值',
     snooze: '推迟',
     undo: '撤销',
     unsnooze: '取消推迟',
@@ -429,10 +442,12 @@ function setup() {
     // their values and the new cells stay blank (read as 0 / stale). Re-running this is harmless.
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
   }
-  // LastDonePeriod + RealizedPeriod store text keys ("2026-06", "2026"); keep both columns
-  // plain-text so Sheets doesn't coerce them into dates (idempotent, safe on every run).
+  // LastDonePeriod + RealizedPeriod + UsedPeriod store text keys ("2026-06", "2026"); keep these
+  // columns plain-text so Sheets doesn't coerce them into dates (idempotent, safe on every run).
   sheet.getRange(2, COL.LAST_DONE_PERIOD, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
   sheet.getRange(2, COL.REALIZED_PERIOD, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
+  sheet.getRange(2, COL.USED_PERIOD, sheet.getMaxRows() - 1, 1).setNumberFormat('@');
+  backfillPeriodBasis_(sheet);   // #C: persist anniversary basis so a later rename can't lose it
   setupCards();
   setupCatalog();
   ScriptApp.getProjectTriggers().forEach(function (tr) {
@@ -448,11 +463,14 @@ function setup() {
 }
 
 function seedExamples_(sheet) {
+  // Width = HEADERS.length (15). Trailing cells: RealizedValue, RealizedPeriod, PeriodBasis,
+  // UsedValue, UsedPeriod. PeriodBasis seeded explicitly (csr_travel is anniversary-basis); the rest
+  // blank (no usage yet). PITFALLS #3 — widen this whenever a column is added.
   const rows = [
-    ['amex_dining', 'Amex Gold', 'Dining credit', '$10', 'dining', 'monthly', 4, '', '', '', '', ''],
-    ['amex_uber',   'Amex Gold', 'Uber Cash',     '$10', 'other',  'monthly', 4, '', '', '', '', ''],
-    ['csr_travel',  'Chase Sapphire Reserve', 'Annual travel credit', '$300', 'travel', 'annual', 14, '', '', '', '', ''],
-    ['csr_lounge',  'Chase Sapphire Reserve', 'Priority Pass lounge', 'Unlimited', 'lounge', 'annual', 30, '', '', '', '', ''],
+    ['amex_dining', 'Amex Gold', 'Dining credit', '$10', 'dining', 'monthly', 4, '', '', '', '', '', 'calendar', '', ''],
+    ['amex_uber',   'Amex Gold', 'Uber Cash',     '$10', 'other',  'monthly', 4, '', '', '', '', '', 'calendar', '', ''],
+    ['csr_travel',  'Chase Sapphire Reserve', 'Annual travel credit', '$300', 'travel', 'annual', 14, '', '', '', '', '', 'anniversary', '', ''],
+    ['csr_lounge',  'Chase Sapphire Reserve', 'Priority Pass lounge', 'Unlimited', 'lounge', 'annual', 30, '', '', '', '', '', 'calendar', '', ''],
   ];
   rows.forEach(function (r) { sheet.appendRow(r); });
 }
@@ -469,6 +487,32 @@ function ensureHeaders_(sheet, headers) {
     sheet.getRange(1, 1, 1, cur.length + missing.length).setFontWeight('bold');
   }
   return cur.concat(missing);
+}
+
+// #C migration (idempotent): fill any blank Benefits.PeriodBasis cell that derives to 'anniversary'
+// with the literal 'anniversary', so a later rename can't lose that issuer-fixed basis (PITFALLS #9).
+// Calendar rows are LEFT BLANK on purpose — calendar is the default and stays re-derivable (and so a
+// future catalog anniversary-upgrade still reaches them). Append-column write only: never touches any
+// other column, nor a cell already set. Returns # of cells stamped. Run from setup().
+function backfillPeriodBasis_(sheet) {
+  const last = sheet.getLastRow();
+  if (last < 2) return 0;
+  const n = last - 1;
+  const cards = sheet.getRange(2, COL.CARD, n, 1).getValues();
+  const bens = sheet.getRange(2, COL.BENEFIT, n, 1).getValues();
+  const basisRange = sheet.getRange(2, COL.PERIOD_BASIS, n, 1);
+  const cur = basisRange.getValues();
+  let changed = 0;
+  for (let i = 0; i < n; i++) {
+    if (normalizeStoredBasis_(cur[i][0])) continue;                 // already persisted → keep
+    const card = String(cards[i][0] || '').trim(), benefit = String(bens[i][0] || '').trim();
+    if (!card || !benefit) continue;
+    if (benefitPeriodBasis_(card, benefit) !== 'anniversary') continue;  // only persist the rare anniversary flag
+    cur[i][0] = 'anniversary';
+    changed++;
+  }
+  if (changed) basisRange.setValues(cur);
+  return changed;
 }
 
 // Append any CATALOG (constant) card+benefit rows that aren't already in the sheet, matched by
@@ -790,22 +834,23 @@ function benefitPeriodBasis_(card, benefit) {
   return basis;
 }
 
-// Pure accumulator: the new {value, period} after a benefit toggles not-done → done. If the stored
-// value already belongs to the current fee period it accumulates; otherwise it's stale (a past
-// period) and resets to just this done's amount. A non-$ amount adds 0. Caller writes cols 11/12.
-function realizedAfterDone_(prevValue, prevPeriod, afYear, amount) {
-  const base = (Number(prevPeriod) === afYear) ? (Number(prevValue) || 0) : 0;
-  const amt = parseAmount_(amount);
-  return { value: base + (amt == null ? 0 : amt), period: afYear };
-}
-
-// Undo counterpart: subtract this benefit's amount, but only when the stored value is from the
-// current period (else there's nothing in this period to reverse); floor at 0. Returns the new value.
-function realizedAfterUndo_(prevValue, prevPeriod, afYear, amount) {
-  if (Number(prevPeriod) !== afYear) return Number(prevValue) || 0;
-  const amt = parseAmount_(amount);
-  const next = (Number(prevValue) || 0) - (amt == null ? 0 : amt);
-  return next < 0 ? 0 : next;
+// Pure: the new {realizedValue, realizedPeriod, usedValue, usedPeriod} after setting the CURRENT
+// sub-period's realized $ to `used`. The single primitive behind done / undo / partial-use / value-
+// on-use (#I/#J) — each just picks a `used` (done = full amount, undo = 0, partial = the typed $).
+//   prev    — { realizedValue, realizedPeriod, usedValue, usedPeriod } read off the row.
+//   afYear  — current annual-fee period (the accumulator's reset key).
+//   subKey  — current sub-period key (periodKey_), the reset key for the editable per-period entry.
+// The accumulator (realizedValue) holds the fee-period total; a stale fee period resets it to 0. We
+// back out ONLY the current sub-period's prior contribution (a past sub-period's stays locked in), so
+// revising a partial — or marking done after a partial — never double-counts. Floors at 0.
+function realizedAfterSetUsed_(prev, afYear, subKey, used) {
+  let u = Number(used); if (!(u >= 0)) u = 0;
+  const samePeriod = Number(prev.realizedPeriod) === afYear;
+  const base = samePeriod ? (Number(prev.realizedValue) || 0) : 0;
+  const prior = (samePeriod && String(prev.usedPeriod) === String(subKey)) ? (Number(prev.usedValue) || 0) : 0;
+  let value = base - prior + u;
+  if (value < 0) value = 0;
+  return { realizedValue: value, realizedPeriod: afYear, usedValue: u, usedPeriod: String(subKey) };
 }
 
 // ----------------------------- DATA -----------------------------
@@ -822,6 +867,13 @@ function normalizeReset_(v) {
 // Catalog PeriodBasis cell → 'anniversary' | 'calendar' (default). Blank/unknown → calendar.
 function normalizeBasis_(v) {
   return String(v == null ? '' : v).toLowerCase().trim() === 'anniversary' ? 'anniversary' : 'calendar';
+}
+// A STORED Benefits.PeriodBasis cell → 'anniversary' | 'calendar' | '' (blank). Unlike normalizeBasis_
+// this preserves blank — a blank cell means "not persisted yet, derive by name" (benefitPeriodBasis_),
+// so old rows keep deriving while persisted rows are trusted as-is (#C). Garbage → '' (derive).
+function normalizeStoredBasis_(v) {
+  const s = String(v == null ? '' : v).toLowerCase().trim();
+  return (s === 'anniversary' || s === 'calendar') ? s : '';
 }
 function readRows_() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME);
@@ -847,9 +899,14 @@ function readRows_() {
       snoozeUntil: v[COL.SNOOZE_UNTIL - 1] ? new Date(v[COL.SNOOZE_UNTIL - 1]) : null,
       realizedValue: Number(v[COL.REALIZED_VALUE - 1]) || 0,
       realizedPeriod: String(v[COL.REALIZED_PERIOD - 1] || ''),
-      // #3: a benefit's reset basis is issuer-fixed (derived from CATALOG by name); its card's
-      // anniversary (MM-DD) anchors the period when that basis is 'anniversary'.
-      periodBasis: benefitPeriodBasis_(card, benefit),
+      // #I/#J: the $ realized in the current sub-period + the sub-period key it belongs to. Read here
+      // so applyAction_ can revise a partial / reverse a value-on-use done (a stale key reads as 0).
+      usedValue: Number(v[COL.USED_VALUE - 1]) || 0,
+      usedPeriod: String(v[COL.USED_PERIOD - 1] || ''),
+      // #3/#C: a benefit's reset basis is issuer-fixed. Prefer the persisted PeriodBasis cell (so a
+      // renamed benefit keeps its anniversary basis); fall back to deriving from CATALOG by name when
+      // blank (old rows / calendar). Its card's anniversary (MM-DD) anchors an 'anniversary' period.
+      periodBasis: normalizeStoredBasis_(v[COL.PERIOD_BASIS - 1]) || benefitPeriodBasis_(card, benefit),
       anniversary: (metaMap[cardKey_(card)] || {}).anniversary || '',
     };
   });
@@ -1091,7 +1148,7 @@ function getCardRows_(card) {
   const suggestions = (cat ? cat.benefits : []).filter(function (b) {
     return !have[String(b.benefit).toLowerCase().trim()];
   }).map(function (b) {
-    return { benefit: b.benefit, amount: b.amount, category: b.category, reset: b.reset, reminderDays: b.reminderDays };
+    return { benefit: b.benefit, amount: b.amount, category: b.category, reset: b.reset, reminderDays: b.reminderDays, periodBasis: b.periodBasis };
   });
   const cardName = rows.length ? rows[0].card : card;
   const m = getCardMeta_(cardName);
@@ -1422,7 +1479,11 @@ function confirmPage_(action, params) {
 }
 
 // --- Server functions callable from the dashboard via google.script.run ---
-function markDone(id) { requireAuth_(); applyAction_('done', id);     return buildDashboardData_(); }
+// markDone takes an optional `value` — the $ a value-on-use benefit (#I, no face amount) was worth;
+// ignored for a normal $-benefit (which realizes its face value). setUsedValue records a partial $
+// used this period (#J) without necessarily marking done. Both clamp/validate inside applyAction_.
+function markDone(id, value) { requireAuth_(); applyAction_('done', id, null, value); return buildDashboardData_(); }
+function setUsedValue(id, value) { requireAuth_(); applyAction_('use', id, null, value); return buildDashboardData_(); }
 function snooze(id, days) { requireAuth_(); applyAction_('snooze', id, days); return buildDashboardData_(); }
 function undo(id)     { requireAuth_(); applyAction_('undo', id);     return buildDashboardData_(); }
 function unsnooze(id) { requireAuth_(); applyAction_('unsnooze', id); return buildDashboardData_(); }
@@ -1493,12 +1554,14 @@ function addBenefits(card, items) {
       usedId[id] = true;
       let rd = Math.round(Number(it && it.reminderDays));
       if (!(rd >= 1)) rd = CONFIG.DEFAULT_REMINDER_DAYS;
+      // Persist only an 'anniversary' basis (#C); calendar/manual adds stay blank → derived on read.
+      const pb = (normalizeBasis_(it && it.periodBasis) === 'anniversary') ? 'anniversary' : '';
       newRows.push([
         id, cardName, benefit,
         String(it && it.amount != null ? it.amount : '').trim(),
         validCategory_(it && it.category),
         normalizeReset_(it && it.reset),
-        rd, '', '', '', '', '',
+        rd, '', '', '', '', '', pb, '', '',   // …RealizedValue, RealizedPeriod, PeriodBasis, UsedValue, UsedPeriod
       ]);
     });
 
@@ -1561,7 +1624,10 @@ function updateCard(card, items) {
       if (!(rd >= 1)) rd = CONFIG.DEFAULT_REMINDER_DAYS;
       const vals = [benefit, String(it && it.amount != null ? it.amount : '').trim(),
                     validCategory_(it && it.category), normalizeReset_(it && it.reset)];
-      return { benefit: benefit, rd: rd, vals: vals, id: it && it.id ? String(it.id) : '' };
+      // Persist only an 'anniversary' basis (#C); used for appended (new) rows. Existing rows keep
+      // their stored PeriodBasis untouched on update (pass 1 writes only Benefit..ReminderDays).
+      const pb = (normalizeBasis_(it && it.periodBasis) === 'anniversary') ? 'anniversary' : '';
+      return { benefit: benefit, rd: rd, vals: vals, pb: pb, id: it && it.id ? String(it.id) : '' };
     };
 
     // Pass 1 — resubmitted existing rows (update in place / keep). Seed the dedup set with each
@@ -1596,7 +1662,7 @@ function updateCard(card, items) {
       seen[k] = true;
       const newId = uniqueId_(cardName, n.benefit, usedId);
       usedId[newId] = true;
-      newRows.push([newId, cardName, n.vals[0], n.vals[1], n.vals[2], n.vals[3], n.rd, '', '', '', '', '']);
+      newRows.push([newId, cardName, n.vals[0], n.vals[1], n.vals[2], n.vals[3], n.rd, '', '', '', '', '', n.pb, '', '']);
     });
 
     const removeIdx = [], removedNames = [];
@@ -1641,9 +1707,20 @@ function confirmFromEmail(action, id, days, token) {
   return { ok: true, message: message };
 }
 
+// Persist a realizedAfterSetUsed_ result back to the row: the fee-period accumulator (RealizedValue/
+// Period) + the editable current sub-period entry (UsedValue/Period). The period columns are stamped
+// plain-text so Sheets can't coerce the year/key into a Date (PITFALLS #1).
+function writeUsed_(sheet, rowIndex, r) {
+  sheet.getRange(rowIndex, COL.REALIZED_VALUE).setValue(r.realizedValue);
+  sheet.getRange(rowIndex, COL.REALIZED_PERIOD).setNumberFormat('@').setValue(String(r.realizedPeriod));
+  sheet.getRange(rowIndex, COL.USED_VALUE).setValue(r.usedValue);
+  sheet.getRange(rowIndex, COL.USED_PERIOD).setNumberFormat('@').setValue(String(r.usedPeriod));
+}
+
 // The single source of truth for writes. Both the dashboard and the confirmation page reach
-// state changes through here; the email-link GET never mutates on its own.
-function applyAction_(action, id, days) {
+// state changes through here; the email-link GET never mutates on its own. `value` carries the typed
+// $ for the value-tracking actions ('done' on a value-on-use benefit, and 'use'); ignored otherwise.
+function applyAction_(action, id, days, value) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -1652,34 +1729,52 @@ function applyAction_(action, id, days) {
     if (data.missing) throw new Error(t_('needSetup'));
     const row = data.rows.filter(function (r) { return r.id === String(id); })[0];
     if (!row) return { ok: false, key: 'notFound' };
+    // Shared context for the value-tracking actions (done / use / undo): the fee-period accumulator
+    // key, the current sub-period key (== isDone_'s), the row's prior realized snapshot, and the
+    // benefit's face $ (null ⇒ value-on-use, no fixed amount).
+    const afYear = annualFeePeriodStartYear_(row.anniversary, now);
+    const subKey = periodKey_(row.reset, now, row.periodBasis, row.anniversary);
+    const prev = { realizedValue: row.realizedValue, realizedPeriod: row.realizedPeriod,
+                   usedValue: row.usedValue, usedPeriod: row.usedPeriod };
+    const face = parseAmount_(row.amount);
 
     if (action === 'done') {
-      // Accumulate realized value only on the real not-done → done transition (so re-tapping done
-      // is idempotent and never double-counts). wasDone reads the OLD lastDonePeriod, before we
-      // overwrite it below. Cross-period stored values reset inside realizedAfterDone_.
-      const wasDone = isDone_(row, now);
-      if (!wasDone) {
-        const afYear = annualFeePeriodStartYear_(row.anniversary, now);
-        const r = realizedAfterDone_(row.realizedValue, row.realizedPeriod, afYear, row.amount);
-        data.sheet.getRange(row.rowIndex, COL.REALIZED_VALUE).setValue(r.value);
-        data.sheet.getRange(row.rowIndex, COL.REALIZED_PERIOD).setNumberFormat('@').setValue(String(r.period));
-      }
-      // Force plain-text format first, or Sheets coerces a monthly key like "2026-06" into a
-      // Date — which then never matches periodKey_() on read (the benefit looks un-done).
-      data.sheet.getRange(row.rowIndex, COL.LAST_DONE_PERIOD)
-        .setNumberFormat('@').setValue(periodKey_(row.reset, now, row.periodBasis, row.anniversary));
+      // "Done" ⇒ the whole credit is used: a $-benefit realizes its face value; a value-on-use benefit
+      // (#I, no face $) realizes the entered `value`. When no value is supplied (e.g. the email link is
+      // re-tapped) we KEEP any value already logged this sub-period, so done never wipes it. The
+      // realizedAfterSetUsed_ back-out makes re-tapping idempotent (no double-count).
+      let used;
+      if (face != null) used = face;
+      else if (value !== undefined && value !== null && String(value).trim() !== '') { used = Number(value); if (!(used >= 0)) used = 0; }
+      else used = (String(row.usedPeriod) === subKey) ? (Number(row.usedValue) || 0) : 0;
+      writeUsed_(data.sheet, row.rowIndex, realizedAfterSetUsed_(prev, afYear, subKey, used));
+      // Force plain-text first, or Sheets coerces a monthly key like "2026-06" into a Date — which
+      // then never matches periodKey_() on read (the benefit looks un-done).
+      data.sheet.getRange(row.rowIndex, COL.LAST_DONE_PERIOD).setNumberFormat('@').setValue(subKey);
       data.sheet.getRange(row.rowIndex, COL.SNOOZE_UNTIL).setValue('');
       return { ok: true, key: 'doneOk', name: row.benefit };
     }
+    if (action === 'use') {
+      // Partial-use (#J): record $ used THIS sub-period without (necessarily) marking done, so
+      // reminders keep firing for the remainder and the amount still counts toward realized. Capped at
+      // the face value. used == face ⇒ promote to done ("done == full", stops reminders); a partial —
+      // or dropping below full — leaves / re-opens the not-done state so reminders resume.
+      let used = Number(value); if (!(used >= 0)) used = 0;
+      if (face != null && used > face) used = face;
+      writeUsed_(data.sheet, row.rowIndex, realizedAfterSetUsed_(prev, afYear, subKey, used));
+      if (face != null && used >= face && used > 0) {
+        data.sheet.getRange(row.rowIndex, COL.LAST_DONE_PERIOD).setNumberFormat('@').setValue(subKey);
+        data.sheet.getRange(row.rowIndex, COL.SNOOZE_UNTIL).setValue('');
+      } else if (row.lastDonePeriod === subKey) {
+        data.sheet.getRange(row.rowIndex, COL.LAST_DONE_PERIOD).setValue('');   // below full → reopen reminders
+      }
+      return { ok: true, key: 'useOk', name: row.benefit };
+    }
     if (action === 'undo') {
-      // Reverse the realized value only when this undo actually reverses a done in the CURRENT fee
-      // period (else there's nothing in this period to subtract); floor at 0.
-      if (isDone_(row, now)) {
-        const afYear = annualFeePeriodStartYear_(row.anniversary, now);
-        if (Number(row.realizedPeriod) === afYear) {
-          data.sheet.getRange(row.rowIndex, COL.REALIZED_VALUE)
-            .setValue(realizedAfterUndo_(row.realizedValue, row.realizedPeriod, afYear, row.amount));
-        }
+      // Undo ⇒ nothing used this sub-period: zero the current entry (backing its contribution out of
+      // the accumulator) and clear done. A past sub-period's locked-in realized stays untouched.
+      if (row.lastDonePeriod === subKey) {
+        writeUsed_(data.sheet, row.rowIndex, realizedAfterSetUsed_(prev, afYear, subKey, 0));
       }
       data.sheet.getRange(row.rowIndex, COL.LAST_DONE_PERIOD).setValue('');
       return { ok: true, key: 'undoOk', name: row.benefit };
@@ -1723,10 +1818,13 @@ function buildDashboardData_() {
     // Accumulate this benefit's realized value into its card's fee-period total. Only $-amount
     // benefits count, and only when the stored value belongs to the current period (lazy reset:
     // a stale RealizedPeriod reads as 0 — no cron).
-    if (parseAmount_(row.amount) != null) cardObj.hasParseable = true;
+    const face = parseAmount_(row.amount);              // null ⇒ value-on-use (no fixed $)
+    const subKey = periodKey_(row.reset, now, row.periodBasis, row.anniversary);
+    const usedThisPeriod = (String(row.usedPeriod) === subKey) ? row.usedValue : 0;  // $ logged this sub-period
+    if (face != null) cardObj.hasParseable = true;
     if (row.periodBasis === 'anniversary') cardObj.hasAnniversaryBenefit = true;
     if (String(row.realizedPeriod) === String(cardObj.afYear)) cardObj.realized += row.realizedValue;
-    const done = isDone_(row, now);
+    const done = (row.lastDonePeriod === subKey);       // == isDone_(row, now), reusing subKey
     const snoozed = isSnoozed_(row, now);
     const endNum = periodEndDayNumber_(row.reset, now, row.periodBasis, row.anniversary);  // null = no expiry ('once')
     const daysLeft = (endNum === null) ? null : endNum - dayNumber_(now);  // sort key; days to period end
@@ -1743,12 +1841,23 @@ function buildDashboardData_() {
       const refresh = periodRefreshDate_(row.reset, now, row.periodBasis, row.anniversary);
       if (refresh) refreshInfo = fmt_(t_('resetsOn'), { date: fmtShortDate_(refresh) });
     }
+    // Partial-use line (#J): a $-benefit with some — but not all — of its face value logged this
+    // period, still pending (a fully-logged one gets marked done; a done one shows the done badge).
+    const usedInfo = (!done && face != null && usedThisPeriod > 0 && usedThisPeriod < face)
+      ? fmt_(t_('usedInfo'), { used: displayAmount_(String(usedThisPeriod)), full: displayAmount_(row.amount) })
+      : '';
     cards[row.card].benefits.push({
       id: row.id, benefit: row.benefit, amount: row.amount, category: row.category,
       reset: row.reset, done: done, snoozed: snoozed, daysLeft: daysLeft,
       snoozeInfo: snoozed ? fmt_(t_('snoozedUntil'), { date: fmtShortDate_(row.snoozeUntil) }) : '',
       expiryInfo: expiryInfo,
       refreshInfo: refreshInfo,
+      // #I/#J value tracking: valueOnUse ⇒ no fixed $ (Mark done prompts for the worth); fullAmount =
+      // numeric face value (input cap); usedValue = $ logged this sub-period; usedInfo = partial line.
+      valueOnUse: face == null,
+      fullAmount: face,
+      usedValue: usedThisPeriod,
+      usedInfo: usedInfo,
       snoozeOptions: (!done && !snoozed) ? snoozeOptionsFor_(row.reset, now, row.periodBasis, row.anniversary) : [],
       snoozeMaxDate: (!done && !snoozed && endNum !== null) ? ymdFromDayNumber_(endNum) : '',  // date-picker cap
     });
@@ -1776,7 +1885,8 @@ function uiStrings_() {
     title: t_('dashTitle'), addCards: t_('addCards'),
     emptyTitle: t_('emptyTitle'), emptySub: t_('emptySub'),
     badgeDone: t_('badgeDone'), badgeToUse: t_('badgeToUse'), badgeSnoozed: t_('badgeSnoozed'),
-    markDone: t_('markDone'), snooze: t_('snooze'), undo: t_('undo'), unsnooze: t_('unsnooze'),
+    markDone: t_('markDone'), logUsed: t_('logUsed'), valuePh: t_('valuePh'),
+    snooze: t_('snooze'), undo: t_('undo'), unsnooze: t_('unsnooze'),
     snoozeNever: t_('snoozeNever'), snoozePick: t_('snoozePick'), snoozePickDate: t_('snoozePickDate'),
     sortBy: t_('sortBy'),
     sortLabels: { expiry: t_('sortExpiry'), amount: t_('sortAmount'), name: t_('sortName'), default: t_('sortDefault') },

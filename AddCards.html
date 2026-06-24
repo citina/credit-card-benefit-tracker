@@ -299,6 +299,7 @@
 
     row._fields={chk:chk,name:name,amt:amt,cat:cat,rst:rst};
     row._reminderDays=(b.reminderDays!=null?b.reminderDays:null);  // period-driven; carried through, not shown
+    row._periodBasis=(b.periodBasis!=null?b.periodBasis:null);     // issuer basis; persisted on add (#C), not shown
     row._id=b.id||'';                                              // present for existing rows (edit mode)
     return row;
   }
@@ -343,6 +344,7 @@
       var item={ benefit:name, amount:f.amt.value.trim(), category:f.cat.value, reset:f.rst.value };
       if(row._id) item.id=row._id;                                    // existing row → update in place
       if(row._reminderDays!=null) item.reminderDays=row._reminderDays; // carry catalog value through
+      if(row._periodBasis!=null) item.periodBasis=row._periodBasis;    // carry issuer basis through (#C)
       items.push(item);
     });
     return items;

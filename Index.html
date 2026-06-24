@@ -59,6 +59,11 @@
   .sortlbl{font-size:13px;color:var(--muted)}
   select.sortsel{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}
   input.snooze-date{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}
+  /* Inline $ entry — value-on-use "Mark done" (#I) and partial-use "Log $ used" (#J). */
+  .amt-wrap{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .amt-edit{display:inline-flex;gap:4px;align-items:center}
+  .amt-pre{font-size:13px;color:var(--muted)}
+  input.amt-input{font:inherit;font-size:13px;width:62px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}
   /* Friendly empty state (no cards yet) — shown by render() when data.cards is empty (not when setup is missing). */
   .empty{text-align:center;padding:32px 20px}
   .empty-title{font-size:17px;font-weight:500;margin-bottom:8px}
@@ -172,6 +177,28 @@
     wrap.querySelector('.snooze-menu').style.display = phase==='menu' ? 'inline-flex' : 'none';
     wrap.querySelector('.snooze-date-row').style.display = phase==='date' ? 'inline-flex' : 'none';
   }
+  // Inline $-entry control. mode 'done' → value-on-use Mark done (#I): enter what the perk was worth
+  // (blank ⇒ $0). mode 'use' → partial-use Log $ used (#J): how much of the credit you've used; prefilled
+  // with any amount already logged this period. Tap the button → reveal input + Confirm/Cancel.
+  function amtWidget(b, mode){
+    var openLabel = mode==='done' ? UI.markDone : UI.logUsed;
+    var def = (mode==='use' && Number(b.usedValue)>0) ? esc(b.usedValue) : '';
+    var maxAttr = (b.fullAmount!=null) ? (' max="'+esc(b.fullAmount)+'"') : '';
+    var ph = mode==='done' ? esc(UI.valuePh) : '';
+    return '<span class="amt-wrap" data-id="'+esc(b.id)+'" data-mode="'+esc(mode)+'">'+
+      '<button class="mark amt-open" data-act="amt-open">'+esc(openLabel)+'</button>'+
+      '<span class="amt-edit" style="display:none">'+
+        '<span class="amt-pre">$</span>'+
+        '<input type="number" class="amt-input" min="0" step="0.01"'+maxAttr+' value="'+def+'" placeholder="'+ph+'" aria-label="'+esc(openLabel)+'">'+
+        '<button class="mark chip" data-act="amt-confirm">'+esc(UI.confirm)+'</button>'+
+        '<button class="mark chip" data-act="amt-cancel">'+esc(UI.cancel)+'</button>'+
+      '</span>'+
+    '</span>';
+  }
+  function amtPhase(wrap, open){
+    wrap.querySelector('[data-act="amt-open"]').style.display = open ? 'none' : '';
+    wrap.querySelector('.amt-edit').style.display = open ? 'inline-flex' : 'none';
+  }
   // Card kebab (⋮) menu: actions collapsed until opened. Remove card asks once more before deleting.
   // (Per-benefit removal now lives in the wizard's Edit card mode.)
   function menuCard(card){
@@ -211,14 +238,17 @@
           var badge=b.done?'<span class="badge b-done">'+esc(UI.badgeDone)+'</span>'
             :b.snoozed?'<span class="badge b-snooze">'+esc(UI.badgeSnoozed)+'</span>'
             :'<span class="badge b-pending">'+esc(UI.badgeToUse)+'</span>';
+          // A value-on-use benefit (no fixed $) marks done via the inline $-entry (#I); a $-benefit
+          // gets a plain Mark done plus a "Log $ used" partial control (#J).
           var acts;
           if(b.done){acts=btn('undo',b.id,UI.undo)}
-          else if(b.snoozed){acts=btn('done',b.id,UI.markDone)+btn('unsnooze',b.id,UI.unsnooze)}
-          else{acts=btn('done',b.id,UI.markDone)+snoozeChips(b)}
+          else if(b.snoozed){acts=(b.valueOnUse?amtWidget(b,'done'):btn('done',b.id,UI.markDone))+btn('unsnooze',b.id,UI.unsnooze)}
+          else if(b.valueOnUse){acts=amtWidget(b,'done')+snoozeChips(b)}
+          else{acts=btn('done',b.id,UI.markDone)+amtWidget(b,'use')+snoozeChips(b)}
           var tail=b.expiryInfo?esc(b.expiryInfo):(b.refreshInfo?esc(b.refreshInfo):esc(b.category));  // pending → days-left+expiry; done → next refresh; else category
-          var meta=(b.snoozed&&b.snoozeInfo)
-            ? esc(b.snoozeInfo)
-            : esc(UI.resets)+' '+esc(resetLabel(b.reset))+' · '+tail;
+          var meta;
+          if(b.snoozed&&b.snoozeInfo){ meta=esc(b.snoozeInfo); }
+          else { meta=esc(UI.resets)+' '+esc(resetLabel(b.reset))+' · '+tail; if(b.usedInfo) meta+=' · '+esc(b.usedInfo); }  // partial-use line (#J)
           return '<div class="ben"><div class="ben-info">'+
             '<div class="name'+(b.done?' done':'')+'">'+esc(b.benefit)+(b.amount?(' — '+esc(fmtAmount(b.amount))):'')+'</div>'+
             '<div class="meta">'+meta+'</div></div>'+
@@ -263,6 +293,26 @@
         .withSuccessHandler(render)
         .withFailureHandler(function(err){ el.disabled=false; el.textContent=UI.confirm; alert(String(err&&err.message||err)); })
         .snoozeDate(inp.getAttribute('data-id'), inp.value);
+      return;
+    }
+    if(action==='amt-open'){                      // reveal the $ input (value-on-use done / partial use)
+      var aw=el.closest('.amt-wrap'); amtPhase(aw,true);
+      var ai=aw.querySelector('.amt-input'); if(ai){ ai.focus(); if(ai.select) ai.select(); }
+      return;
+    }
+    if(action==='amt-cancel'){ amtPhase(el.closest('.amt-wrap'),false); return; }
+    if(action==='amt-confirm'){                    // commit: markDone(id,value) [done] or setUsedValue(id,value) [use]
+      var aw2=el.closest('.amt-wrap'), ai2=aw2.querySelector('.amt-input');
+      var mode=aw2.getAttribute('data-mode'), aid=aw2.getAttribute('data-id');
+      var raw=ai2?String(ai2.value).trim():'';
+      if(mode==='use' && raw===''){ if(ai2) ai2.focus(); return; }   // partial requires a number; done allows blank ⇒ $0
+      var val = raw==='' ? '' : Number(raw);
+      if(raw!=='' && !(val>=0)){ if(ai2) ai2.focus(); return; }
+      el.disabled=true; el.textContent=UI.saving;
+      var runA=google.script.run
+        .withSuccessHandler(render)
+        .withFailureHandler(function(err){ el.disabled=false; el.textContent=UI.confirm; alert(String(err&&err.message||err)); });
+      if(mode==='use') runA.setUsedValue(aid, val); else runA.markDone(aid, val);
       return;
     }
     if(action==='remove-card-open'){             // reveal the confirm step inside the menu

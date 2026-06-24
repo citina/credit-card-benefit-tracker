@@ -44,9 +44,10 @@ vm.createContext(sb); vm.runInContext(code, sb);
 const SR = sb.shouldRemind_, PED = sb.periodEndDate_, DB = sb.daysBetween_, FSD = sb.fmtShortDate_, UC = sb.updateCard, GCR = sb.getCardRows_, U = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
 const PRD = sb.periodRefreshDate_, SUDN = sb.snoozeUntilDayNumber_, DN = sb.dayNumber_;
 const NRD = sb.nextReminderDate_;
-const PA = sb.parseAmount_, AFPSY = sb.annualFeePeriodStartYear_, AFRD = sb.annualFeeResetDate_, RAD = sb.realizedAfterDone_, RAU = sb.realizedAfterUndo_;
+const PA = sb.parseAmount_, AFPSY = sb.annualFeePeriodStartYear_, AFRD = sb.annualFeeResetDate_, RASU = sb.realizedAfterSetUsed_;
 const DA = sb.displayAmount_;
 const PK = sb.periodKey_, PSDN = sb.periodStartDayNumber_, BPB = sb.benefitPeriodBasis_, NA = sb.normalizeAnniversary_;
+const NSB = sb.normalizeStoredBasis_, RR = sb.readRows_;   // #C persisted-basis read
 let pass = 0, fail = 0;
 const t = (n, g, e) => { if (JSON.stringify(g) === JSON.stringify(e)) pass++; else { fail++; console.log("  FAIL " + n + ": got " + JSON.stringify(g) + " exp " + JSON.stringify(e)); } };
 // reminders + expiry
@@ -103,12 +104,18 @@ t("afYear before anniversary", AFPSY('2024-06-06', U(2026, 3, 1)), 2025);
 t("afYear blank → calendar", AFPSY('', U(2026, 8, 9)), 2026);
 t("feeReset next anniversary", FSD(AFRD('2024-06-06', U(2026, 6, 16))), "Jun 6");   // → 2027-06-06
 t("feeReset blank → Jan 1", FSD(AFRD('', U(2026, 6, 16))), "Jan 1");
-t("realized same period adds", RAD(60, 2026, 2026, '$10'), { value: 70, period: 2026 });
-t("realized cross period resets", RAD(60, 2025, 2026, '$10'), { value: 10, period: 2026 });  // stale base → just this amount
-t("realized Unlimited adds 0", RAD(60, 2026, 2026, 'Unlimited'), { value: 60, period: 2026 });
-t("undo same period subtracts", RAU(70, 2026, 2026, '$10'), 60);
-t("undo floors at 0", RAU(5, 2026, 2026, '$10'), 0);
-t("undo other period untouched", RAU(70, 2025, 2026, '$10'), 70);
+// #I/#J realizedAfterSetUsed_ — the single accumulator behind done/undo/partial/value-on-use.
+// prev = {realizedValue, realizedPeriod, usedValue, usedPeriod}; result mirrors it.
+const P = (rv, rp, uv, up) => ({ realizedValue: rv, realizedPeriod: rp, usedValue: uv, usedPeriod: up });
+t("setUsed done fresh adds", RASU(P(60, 2026, 0, ''), 2026, '2026-06', 10), P(70, 2026, 10, '2026-06'));
+t("setUsed cross fee period resets", RASU(P(60, 2025, 0, ''), 2026, '2026-06', 10), P(10, 2026, 10, '2026-06'));  // stale base → 0
+t("setUsed value-on-use 0 adds nothing", RASU(P(60, 2026, 0, ''), 2026, '2026-06', 0), P(60, 2026, 0, '2026-06'));
+t("setUsed revise partial backs out prior", RASU(P(65, 2026, 5, '2026-06'), 2026, '2026-06', 8), P(68, 2026, 8, '2026-06'));  // 65-5+8
+t("setUsed done after partial = full no double-count", RASU(P(65, 2026, 5, '2026-06'), 2026, '2026-06', 10), P(70, 2026, 10, '2026-06'));
+t("setUsed undo (0) backs out current sub-period", RASU(P(70, 2026, 10, '2026-06'), 2026, '2026-06', 0), P(60, 2026, 0, '2026-06'));
+t("setUsed undo floors at 0", RASU(P(5, 2026, 10, '2026-06'), 2026, '2026-06', 0), P(0, 2026, 0, '2026-06'));
+t("setUsed prior sub-period stays locked", RASU(P(30, 2026, 10, '2026-05'), 2026, '2026-06', 10), P(40, 2026, 10, '2026-06'));  // May $10 locked in 30
+t("setUsed negative clamps to 0", RASU(P(60, 2026, 0, ''), 2026, '2026-06', -5), P(60, 2026, 0, '2026-06'));
 t("afYear accepts MM-DD", AFPSY('06-06', U(2026, 6, 16)), 2026);
 // #1 anniversary normalize (MM-DD; year dropped)
 t("normalizeAnniv MM-DD", NA('06-06'), '06-06');
@@ -178,6 +185,46 @@ var resd = UC('Amex Gold', [
 t("dedup edit: no dup added", resd.added, []);
 t("dedup edit: one Uber Cash row", currentSheet._grid.filter(r => r[1] === 'Amex Gold' && r[2] === 'Uber Cash').length, 1);
 t("dedup edit: existing status preserved", (currentSheet._grid.find(r => r[0] === 'amex_uber') || [])[7], '2026-06');
+
+// ----- #C persist PeriodBasis into Benefits: normalize, backfill, write-through, read precedence -----
+// normalizeStoredBasis_: preserves blank (= "derive by name"), unlike normalizeBasis_ which defaults calendar
+t("storedBasis anniversary", NSB('anniversary'), 'anniversary');
+t("storedBasis calendar kept", NSB('calendar'), 'calendar');
+t("storedBasis blank stays blank", NSB(''), '');
+t("storedBasis garbage → blank", NSB('weekly'), '');
+// backfillPeriodBasis_: stamp only blank cells that DERIVE to anniversary; leave calendar blank; keep set cells
+var bfSheet = makeSheet([
+  ['csr_travel', 'Chase Sapphire Reserve', 'Annual travel credit', '$300', 'travel', 'annual', 14, '', '', ''], // derives anniversary → stamp
+  ['amex_uber', 'Amex Gold', 'Uber Cash', '$10', 'other', 'monthly', 4, '', '', ''],                            // derives calendar → leave blank
+  ['x', 'Some Card', 'Whatever', '$5', 'other', 'monthly', 7, '', '', '', '', '', 'anniversary'],               // already set → untouched
+]);
+t("backfill count", sb.backfillPeriodBasis_(bfSheet), 1);
+t("backfill stamps anniversary", bfSheet._grid[0][12], 'anniversary');
+t("backfill leaves calendar blank", NSB(bfSheet._grid[1][12]), '');   // stub gives undefined; real Sheets ''
+t("backfill keeps existing set", bfSheet._grid[2][12], 'anniversary');
+t("backfill idempotent", sb.backfillPeriodBasis_(bfSheet), 0);
+// updateCard appends persist an anniversary basis (calendar/manual → blank) + leave Used* blank
+currentSheet = makeSheet([['amex_uber', 'Amex Gold', 'Uber Cash', '$10', 'other', 'monthly', 4, '2026-06', '', '']]);
+UC('Amex Gold', [
+  { id: 'amex_uber', benefit: 'Uber Cash', amount: '$10', category: 'other', reset: 'monthly', reminderDays: 4 },
+  { benefit: 'Annual travel', amount: '$300', category: 'travel', reset: 'annual', reminderDays: 30, periodBasis: 'anniversary' },
+  { benefit: 'Lounge perk', amount: '$5', category: 'other', reset: 'monthly', periodBasis: 'calendar' },
+]);
+var gPB = currentSheet._grid, byBen = nm => gPB.find(r => r[2] === nm) || [];
+t("updateCard persists anniversary basis", byBen('Annual travel')[12], 'anniversary');
+t("updateCard calendar basis blank", byBen('Lounge perk')[12], '');
+t("updateCard new-row Used* blank", [byBen('Annual travel')[13], byBen('Annual travel')[14]], ['', '']);
+// readRows_ precedence: a stored basis wins over derive-by-name; blank falls back to derivation
+currentCards = null;
+currentSheet = makeSheet([
+  ['a', 'Chase Sapphire Reserve', 'Annual travel credit', '$300', 'travel', 'annual', 30, '', '', '', '', '', 'calendar'], // stored overrides derive-anniversary
+  ['b', 'Chase Sapphire Reserve', 'Annual travel credit', '$300', 'travel', 'annual', 30, '', '', '', '', '', ''],         // blank → derive anniversary
+]);
+var rrRows = RR().rows;
+t("readRows stored basis wins", rrRows[0].periodBasis, 'calendar');
+t("readRows blank basis derives", rrRows[1].periodBasis, 'anniversary');
+t("readRows reads usedValue/usedPeriod blank → 0/''", [rrRows[0].usedValue, rrRows[0].usedPeriod], [0, '']);
+currentSheet = null;
 
 // ----- catalog freshness spine: header migration, header-based reads, stale-date parsing -----
 const GCD = sb.getCatalogData_, EH = sb.ensureHeaders_, MSV = sb.monthsSinceVerified_, CS = sb.catalogStale_;
