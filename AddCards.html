@@ -19,13 +19,13 @@
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
   .lbl{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
   .sel,.txt{font:inherit;font-size:15px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%}
-  .meta-row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
-  .field-lbl{flex:0 1 auto;min-width:140px}   /* hug content + sit left (no half-row gap) */
-  .ann-row{display:flex;gap:5px;width:200px}
+  .meta-row{display:flex;gap:14px;flex-wrap:wrap}
+  .field-lbl{flex:1;min-width:140px}   /* fill the row — fee + anniversary each ~half width */
+  .ann-row{display:flex;gap:8px}
   .ann-row select{flex:1;min-width:0}
   #cardOther{margin-top:10px}
-  /* Currency fields: $ prefix + a fixed, compact width (fee/seed are plain numbers, not free text). */
-  .cur{position:relative;display:block;width:160px;max-width:100%}
+  /* Currency fields: $ prefix, full-width like the other inputs (fee/seed are plain numbers). */
+  .cur{position:relative;display:block;width:100%}
   .cur::before{content:'$';position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:15px;pointer-events:none}
   .cur .txt{padding-left:22px}
   /* Inline info icon with a hover/tap tooltip (CSS-only, no JS). */
