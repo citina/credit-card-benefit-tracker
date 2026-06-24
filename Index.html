@@ -59,6 +59,17 @@
   .sortlbl{font-size:13px;color:var(--muted)}
   select.sortsel{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}
   input.snooze-date{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}
+  /* Friendly empty state (no cards yet) — shown by render() when data.cards is empty (not when setup is missing). */
+  .empty{text-align:center;padding:32px 20px}
+  .empty-title{font-size:17px;font-weight:500;margin-bottom:8px}
+  .empty-sub{font-size:14px;color:var(--muted);line-height:1.5;margin:0 auto 18px;max-width:380px}
+  .empty-cta{display:inline-block;font-size:14px;font-weight:500;color:#fff;background:#185FA5;padding:9px 18px;border-radius:10px;text-decoration:none}
+  .empty-cta:hover{background:#13497f}
+  /* Narrow screens: stack each benefit row so the badge + action buttons sit left under the name. */
+  @media (max-width:480px){
+    .ben{flex-direction:column;align-items:stretch;gap:8px}
+    .ben-right{justify-content:flex-start}
+  }
 </style>
 </head>
 <body>
@@ -183,6 +194,15 @@
   function render(data){
     LAST=data;
     document.getElementById('sortbar').style.display = data.cards.length ? 'flex' : 'none';
+    if(!data.cards.length){   // setup is done but no cards yet → friendly empty state + Add-cards CTA
+      document.getElementById('cards').innerHTML=
+        '<div class="card empty">'+
+          '<div class="empty-title">'+esc(UI.emptyTitle)+'</div>'+
+          '<div class="empty-sub">'+esc(UI.emptySub)+'</div>'+
+          '<a class="empty-cta" target="_top" href="'+esc(ADD_URL)+'">'+esc(UI.addCards)+'</a>'+
+        '</div>';
+      return;
+    }
     document.getElementById('cards').innerHTML=data.cards.map(function(c){
       return '<div class="card"><div class="card-head"><div class="card-name">'+esc(c.card)+'</div>'+
         menuCard(c.card)+'</div>'+

@@ -169,6 +169,8 @@ const STRINGS = {
     catalogReviewVerified: 'Last verified {date} · {months} months ago',
     catalogReviewSource: 'Open source page',
     dashTitle: 'Card benefit tracker',
+    emptyTitle: 'No cards yet',
+    emptySub: 'Add your cards to start tracking benefits before they expire.',
     badgeDone: 'Done',
     badgeToUse: 'To use',
     badgeSnoozed: 'Snoozed',
@@ -276,6 +278,8 @@ const STRINGS = {
     catalogReviewVerified: '上次核实 {date} · {months} 个月前',
     catalogReviewSource: '打开来源页面',
     dashTitle: '信用卡权益追踪',
+    emptyTitle: '还没有卡片',
+    emptySub: '添加你的卡片,开始追踪权益,别让它们过期。',
     badgeDone: '已使用',
     badgeToUse: '待使用',
     badgeSnoozed: '已推迟',
@@ -1765,6 +1769,7 @@ function buildDashboardData_() {
 function uiStrings_() {
   return {
     title: t_('dashTitle'), addCards: t_('addCards'),
+    emptyTitle: t_('emptyTitle'), emptySub: t_('emptySub'),
     badgeDone: t_('badgeDone'), badgeToUse: t_('badgeToUse'), badgeSnoozed: t_('badgeSnoozed'),
     markDone: t_('markDone'), snooze: t_('snooze'), undo: t_('undo'), unsnooze: t_('unsnooze'),
     snoozeNever: t_('snoozeNever'), snoozePick: t_('snoozePick'), snoozePickDate: t_('snoozePickDate'),
