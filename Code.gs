@@ -63,101 +63,197 @@ const CATEGORIES = ['travel', 'dining', 'hotel', 'streaming', 'grocery', 'lounge
 // setupCatalog() seeds these into an editable `Catalog` sheet on first run; the wizard reads
 // that sheet if present, else this constant (see getCatalogData_()). Each benefit maps 1:1 to
 // the Benefits schema minus ID (generated on add). `reset` ∈ monthly/quarterly/semiannual/annual/
-// once; `category` ∈ CATEGORIES. These are USE-IT-OR-LOSE-IT recurring credits only — not
-// multipliers, sign-up bonuses, or every-few-years perks (Global Entry etc.).
+// once; `category` ∈ CATEGORIES. These are recurring use-it-or-lose-it benefits that need
+// reminders: statement credits, monthly promos, annual certificates. Exclude built-in status/lounge
+// access, earning multipliers, sign-up bonuses, and every-few-years perks (Global Entry etc.).
 //
-// FRESHNESS: amounts/cadence verified 2026-06 via issuer + reporting. Card terms change; the
+// FRESHNESS: amounts/cadence verified 2026-06-24 via issuer pages. Card terms change; the
 // wizard shows lastVerified + a "verify with your issuer" note, and manual-add covers the rest.
 const CATALOG = {
   'Chase Sapphire Preferred': {
-    lastVerified: '2026-06-19',
+    issuer: 'Chase',
+    sourceUrl: 'https://creditcards.chase.com/rewards-credit-cards/sapphire/preferred',
+    lastVerified: '2026-06-24',
     annualFee: 95,
     benefits: [
-      // Chase Travel hotel credit doubled to $100/anniversary year effective 2026-06-15.
-      // ANNIVERSARY-year reset (cardmember year, NOT calendar) — verified 2026-06. periodBasis
-      // 'anniversary' shifts its reset/expiry off Jan 1 to the card's anniversary (#3); needs the
-      // card's Anniversary set, else it falls back to calendar.
-      { benefit: 'Hotel credit (Chase Travel)', amount: '$100', category: 'hotel',  reset: 'annual',  reminderDays: 30, periodBasis: 'anniversary' },
-      { benefit: 'DoorDash credit (DashPass)',  amount: '$10',  category: 'dining', reset: 'monthly', reminderDays: 7 },
+      { benefit: 'Hotel credit (Chase Travel)', amount: '$100', category: 'hotel',  reset: 'annual',  reminderDays: 30, periodBasis: 'anniversary',
+        notes: 'Account anniversary year; hotel stays purchased through Chase Travel.' },
+      { benefit: 'DoorDash credit (DashPass)',  amount: '$10',  category: 'dining', reset: 'monthly', reminderDays: 7,
+        notes: 'Monthly DoorDash promo for DashPass members; activate by 2027-12-31; benefit currently available through 2027-12-31.' },
     ],
   },
   'Amex Gold': {
-    lastVerified: '2026-06-19',
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/us/credit-cards/card/gold-card/',
+    lastVerified: '2026-06-24',
     annualFee: 325,
     benefits: [
-      { benefit: 'Uber Cash',     amount: '$10', category: 'other',  reset: 'monthly',    reminderDays: 4 },
-      { benefit: 'Dining credit', amount: '$10', category: 'dining', reset: 'monthly',    reminderDays: 7 },  // Grubhub, Five Guys, Cheesecake Factory, etc.
-      { benefit: 'Dunkin credit', amount: '$7',  category: 'dining', reset: 'monthly',    reminderDays: 7 },
-      { benefit: 'Resy credit',   amount: '$50', category: 'dining', reset: 'semiannual', reminderDays: 21 }, // $50 H1 + $50 H2
+      { benefit: 'Uber Cash',     amount: '$10', category: 'other',  reset: 'monthly',    reminderDays: 4,
+        notes: 'Monthly Uber Cash for U.S. Uber rides/orders after adding the card to Uber.' },
+      { benefit: 'Dining credit', amount: '$10', category: 'dining', reset: 'monthly',    reminderDays: 7,
+        notes: 'Monthly statement credit at eligible partners; enrollment required.' },
+      { benefit: 'Dunkin credit', amount: '$7',  category: 'dining', reset: 'monthly',    reminderDays: 7,
+        notes: 'Monthly U.S. Dunkin statement credit; enrollment required.' },
+      { benefit: 'Resy credit',   amount: '$50', category: 'dining', reset: 'semiannual', reminderDays: 21,
+        notes: '$50 Jan-Jun and $50 Jul-Dec at qualifying U.S. Resy restaurants; enrollment required.' },
     ],
   },
   'Amex Platinum': {
-    lastVerified: '2026-06-19',
-    annualFee: 695,
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/us/credit-cards/card/platinum/',
+    lastVerified: '2026-06-24',
+    annualFee: 895,
     benefits: [
-      { benefit: 'Uber Cash',                       amount: '$15',    category: 'other',     reset: 'monthly',    reminderDays: 4 },  // +$20 bonus in December
-      { benefit: 'Digital entertainment credit',    amount: '$25',    category: 'streaming', reset: 'monthly',    reminderDays: 7 },  // Disney+, Hulu, NYT, Peacock, WSJ, etc.
-      { benefit: 'Walmart+ membership',             amount: '$12.95', category: 'other',     reset: 'monthly',    reminderDays: 7 },
-      { benefit: 'Resy dining credit',              amount: '$100',   category: 'dining',    reset: 'quarterly',  reminderDays: 21 },
-      { benefit: 'Lululemon credit',                amount: '$75',    category: 'other',     reset: 'quarterly',  reminderDays: 21 },
-      { benefit: 'Hotel credit (FHR / Hotel Coll.)', amount: '$300',  category: 'hotel',     reset: 'semiannual', reminderDays: 30 },
-      { benefit: 'Airline fee credit',              amount: '$200',   category: 'travel',    reset: 'annual',     reminderDays: 30 },
-      { benefit: 'CLEAR Plus credit',               amount: '$209',   category: 'travel',    reset: 'annual',     reminderDays: 30 },
-      { benefit: 'Oura Ring credit',                amount: '$200',   category: 'other',     reset: 'annual',     reminderDays: 30 },
+      { benefit: 'Uber Cash',                       amount: '$15',    category: 'other',     reset: 'monthly',    reminderDays: 4,
+        notes: '$15 monthly plus a $20 bonus in December; U.S. Uber rides/orders.' },
+      { benefit: 'Digital entertainment credit',    amount: '$25',    category: 'streaming', reset: 'monthly',    reminderDays: 7,
+        notes: 'Monthly statement credit with eligible digital entertainment partners; enrollment required.' },
+      { benefit: 'Walmart+ membership',             amount: '$12.95', category: 'other',     reset: 'monthly',    reminderDays: 7,
+        notes: 'Monthly Walmart+ membership credit, plus applicable taxes on one membership; enrollment required.' },
+      { benefit: 'Resy dining credit',              amount: '$100',   category: 'dining',    reset: 'quarterly',  reminderDays: 21,
+        notes: 'Quarterly U.S. Resy dining statement credit; enrollment required.' },
+      { benefit: 'Lululemon credit',                amount: '$75',    category: 'other',     reset: 'quarterly',  reminderDays: 21,
+        notes: 'Quarterly U.S. lululemon retail/lululemon.com statement credit; enrollment required.' },
+      { benefit: 'Hotel credit (FHR / Hotel Coll.)', amount: '$300',  category: 'hotel',     reset: 'semiannual', reminderDays: 30,
+        notes: '$300 Jan-Jun and $300 Jul-Dec on prepaid FHR/The Hotel Collection bookings through Amex Travel; enrollment required.' },
+      { benefit: 'Airline fee credit',              amount: '$200',   category: 'travel',    reset: 'annual',     reminderDays: 30,
+        notes: 'Calendar-year incidental fee credit with one selected qualifying airline; enrollment required.' },
+      { benefit: 'CLEAR Plus credit',               amount: '$209',   category: 'travel',    reset: 'annual',     reminderDays: 30,
+        notes: 'Calendar-year CLEAR+ membership statement credit; enrollment required.' },
+      { benefit: 'Oura Ring credit',                amount: '$200',   category: 'other',     reset: 'annual',     reminderDays: 30,
+        notes: 'Calendar-year statement credit for eligible Oura Ring purchase at ouraring.com; enrollment required.' },
+      { benefit: 'Equinox credit',                  amount: '$300',   category: 'other',     reset: 'annual',     reminderDays: 30,
+        notes: 'Calendar-year statement credit for eligible Equinox+ digital subscription or club membership; enrollment required.' },
     ],
   },
   'Chase Sapphire Reserve': {
-    lastVerified: '2026-06-19',
+    issuer: 'Chase',
+    sourceUrl: 'https://creditcards.chase.com/rewards-credit-cards/sapphire/reserve',
+    lastVerified: '2026-06-24',
     annualFee: 795,
     benefits: [
-      { benefit: 'Dining credit (Exclusive Tables)', amount: '$150', category: 'dining',  reset: 'semiannual', reminderDays: 21 }, // OpenTable; $150 H1 + $150 H2
-      { benefit: 'The Edit hotel credit',            amount: '$250', category: 'hotel',   reset: 'semiannual', reminderDays: 30 },
-      { benefit: 'StubHub / viagogo credit',         amount: '$150', category: 'other',   reset: 'semiannual', reminderDays: 21 },
-      { benefit: 'DoorDash credit (DashPass)',       amount: '$25',  category: 'dining',  reset: 'monthly',    reminderDays: 7 },  // $5 restaurant + 2×$10 non-restaurant
-      { benefit: 'Lyft credit',                      amount: '$10',  category: 'travel',  reset: 'monthly',    reminderDays: 7 },
-      { benefit: 'Peloton credit',                   amount: '$120', category: 'other',   reset: 'annual',     reminderDays: 30 },
-      // ANNIVERSARY-year reset (account anniversary, NOT calendar) — verified 2026-06. periodBasis
-      // 'anniversary' shifts reset/expiry to the card anniversary (#3); needs Anniversary set.
-      { benefit: 'Annual travel credit',             amount: '$300', category: 'travel',  reset: 'annual',     reminderDays: 30, periodBasis: 'anniversary' },
+      { benefit: 'Dining credit (Exclusive Tables)', amount: '$150', category: 'dining',  reset: 'semiannual', reminderDays: 21,
+        notes: '$150 Jan-Jun and $150 Jul-Dec at Sapphire Exclusive Tables restaurants on OpenTable.' },
+      { benefit: 'The Edit hotel credit',            amount: '$500', category: 'hotel',   reset: 'annual',     reminderDays: 30,
+        notes: 'Calendar-year cap; up to $250 per prepaid The Edit booking, 2-night minimum.' },
+      { benefit: 'StubHub / viagogo credit',         amount: '$150', category: 'other',   reset: 'semiannual', reminderDays: 21,
+        notes: '$150 Jan-Jun and $150 Jul-Dec for direct StubHub/viagogo purchases through 2027-12-31; activation required.' },
+      { benefit: 'DoorDash credit (DashPass)',       amount: '$25',  category: 'dining',  reset: 'monthly',    reminderDays: 7,
+        notes: '$5 monthly restaurant promo plus two $10 grocery/retail promos; available through 2027-12-31.' },
+      { benefit: 'Lyft credit',                      amount: '$10',  category: 'travel',  reset: 'monthly',    reminderDays: 7,
+        notes: 'Monthly in-app Lyft credit through 2027-09-30.' },
+      { benefit: 'Peloton credit',                   amount: '$10',  category: 'other',   reset: 'monthly',    reminderDays: 7,
+        notes: 'Monthly eligible Peloton membership statement credit through 2027-12-31; activation required.' },
+      { benefit: 'Annual travel credit',             amount: '$300', category: 'travel',  reset: 'annual',     reminderDays: 30, periodBasis: 'anniversary',
+        notes: 'Account anniversary year travel statement credit.' },
     ],
   },
-  // Added 2026-06-19 — verify amounts/fees against the issuer before relying on them.
   'Capital One Venture X': {
-    lastVerified: '2026-06-19',
+    issuer: 'Capital One',
+    sourceUrl: 'https://www.capitalone.com/credit-cards/travel-and-miles/',
+    lastVerified: '2026-06-24',
     annualFee: 395,
     benefits: [
-      // $300 travel credit via Capital One Travel; resets on the CARD ANNIVERSARY year (set the
-      // card's anniversary, like CSP/CSR). The 10k anniversary miles aren't a $ credit (excluded).
-      { benefit: 'Annual travel credit (Capital One Travel)', amount: '$300', category: 'travel', reset: 'annual', reminderDays: 30, periodBasis: 'anniversary' },
+      { benefit: 'Annual travel credit (Capital One Travel)', amount: '$300', category: 'travel', reset: 'annual', reminderDays: 30, periodBasis: 'anniversary',
+        notes: 'Capital One Travel credit expires on the next account open date anniversary.' },
     ],
   },
   'Marriott Bonvoy Brilliant': {
-    lastVerified: '2026-06-19',
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/us/credit-cards/card/marriott-bonvoy-brilliant/',
+    lastVerified: '2026-06-24',
     annualFee: 650,
     benefits: [
-      { benefit: 'Dining credit', amount: '$25', category: 'dining', reset: 'monthly', reminderDays: 7 },  // $25/month
+      { benefit: 'Dining credit', amount: '$25', category: 'dining', reset: 'monthly', reminderDays: 7,
+        notes: 'Monthly restaurant statement credit, up to $300 per calendar year.' },
+      { benefit: 'Annual free night award', amount: 'Free night', category: 'hotel', reset: 'annual', reminderDays: 60, periodBasis: 'anniversary',
+        notes: 'Issued every year after card renewal month; award up to 85,000 Marriott Bonvoy points and expires if unused.' },
     ],
   },
   'Citi Strata Premier': {
-    lastVerified: '2026-06-19',
+    issuer: 'Citi',
+    sourceUrl: 'https://www.citi.com/credit-cards/citi-strata-premier-credit-card',
+    lastVerified: '2026-06-24',
     annualFee: 95,
     benefits: [
-      { benefit: 'Annual hotel credit', amount: '$100', category: 'hotel', reset: 'annual', reminderDays: 30 },  // one hotel stay of $500+
+      { benefit: 'Annual hotel credit', amount: '$100', category: 'hotel', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year $100 off one Citi Travel hotel stay of $500+ excluding taxes/fees.' },
     ],
   },
   'Amex Green': {
-    lastVerified: '2026-06-19',
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/us/credit-cards/card/green/',
+    lastVerified: '2026-06-24',
     annualFee: 150,
     benefits: [
-      { benefit: 'CLEAR Plus credit', amount: '$209', category: 'travel', reset: 'annual', reminderDays: 30 },
+      { benefit: 'CLEAR Plus credit', amount: '$209', category: 'travel', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year CLEAR+ membership statement credit.' },
+    ],
+  },
+  'Hilton Honors Aspire': {
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/en-us/credit-cards/credit-intel/amex-hilton-cards/',
+    lastVerified: '2026-06-24',
+    annualFee: 550,
+    benefits: [
+      { benefit: 'Hilton resort credit', amount: '$200', category: 'hotel', reset: 'semiannual', reminderDays: 30,
+        notes: '$200 Jan-Jun and $200 Jul-Dec for eligible purchases made directly with participating Hilton Resorts.' },
+      { benefit: 'Flight credit', amount: '$50', category: 'travel', reset: 'quarterly', reminderDays: 21,
+        notes: 'Quarterly credit for flight purchases made directly with an airline or through AmexTravel.com.' },
+      { benefit: 'CLEAR Plus credit', amount: '$209', category: 'travel', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year CLEAR+ membership statement credit.' },
+      { benefit: 'Annual free night reward', amount: 'Free night', category: 'hotel', reset: 'annual', reminderDays: 60, periodBasis: 'anniversary',
+        notes: 'Free Night Reward in the first cardmembership year and every year upon card renewal; spend-based extra rewards excluded.' },
+    ],
+  },
+  'Delta SkyMiles Reserve': {
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/us/credit-cards/card/delta-skymiles-reserve-american-express-card/',
+    lastVerified: '2026-06-24',
+    annualFee: 650,
+    benefits: [
+      { benefit: 'Companion Certificate', amount: 'Companion certificate', category: 'travel', reset: 'annual', reminderDays: 60, periodBasis: 'anniversary',
+        notes: 'Issued each year after card renewal for eligible Delta round-trip travel; taxes/fees and fare restrictions apply.' },
+      { benefit: 'Resy credit', amount: '$20', category: 'dining', reset: 'monthly', reminderDays: 7,
+        notes: 'Monthly statement credit at qualifying U.S. Resy restaurants; enrollment required.' },
+      { benefit: 'Rideshare credit', amount: '$10', category: 'travel', reset: 'monthly', reminderDays: 7,
+        notes: 'Monthly U.S. rideshare statement credit; enrollment required.' },
+      { benefit: 'Delta Stays credit', amount: '$200', category: 'hotel', reset: 'annual', reminderDays: 30,
+        notes: 'Annual statement credit for prepaid hotels or vacation rentals booked through Delta Stays on delta.com.' },
+    ],
+  },
+  'Amex Business Platinum': {
+    issuer: 'American Express',
+    sourceUrl: 'https://www.americanexpress.com/us/credit-cards/business/business-credit-cards/american-express-business-platinum-credit-card-amex/',
+    lastVerified: '2026-06-24',
+    annualFee: 895,
+    benefits: [
+      { benefit: 'Hotel credit (FHR / Hotel Coll.)', amount: '$300', category: 'hotel', reset: 'semiannual', reminderDays: 30,
+        notes: '$300 Jan-Jun and $300 Jul-Dec on prepaid FHR/The Hotel Collection bookings through Amex Travel; enrollment required.' },
+      { benefit: 'Hilton credit', amount: '$50', category: 'hotel', reset: 'quarterly', reminderDays: 21,
+        notes: 'Quarterly direct Hilton purchase statement credit; Hilton for Business membership/enrollment required.' },
+      { benefit: 'Airline fee credit', amount: '$200', category: 'travel', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year incidental fee credit with one selected qualifying airline; enrollment required.' },
+      { benefit: 'CLEAR Plus credit', amount: '$209', category: 'travel', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year CLEAR+ membership statement credit; enrollment required.' },
+      { benefit: 'Dell Technologies credit', amount: '$150', category: 'other', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year base Dell Technologies statement credit. Additional $1,000 after $5,000 Dell spend is excluded; add manually if unlocked.' },
+      { benefit: 'ChatGPT Business credit', amount: '$300', category: 'other', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year statement credit for U.S. purchases of ChatGPT Business; enrollment required.' },
+      { benefit: 'Adobe credit', amount: '$250', category: 'other', reset: 'annual', reminderDays: 30,
+        notes: 'Calendar-year statement credit after $600+ in eligible U.S. Adobe purchases; enrollment required.' },
+      { benefit: 'Indeed credit', amount: '$90', category: 'other', reset: 'quarterly', reminderDays: 21,
+        notes: 'Quarterly U.S. Indeed purchase statement credit; enrollment required.' },
+      { benefit: 'Wireless credit', amount: '$10', category: 'other', reset: 'monthly', reminderDays: 7,
+        notes: 'Monthly U.S. wireless telephone service statement credit; enrollment required.' },
     ],
   },
 };
-// Appended columns (SourceUrl/PeriodBasis/Notes) are migrated onto existing sheets by ensureHeaders_
+// Appended columns (SourceUrl/PeriodBasis/Notes/Issuer) are migrated onto existing sheets by ensureHeaders_
 // (PITFALLS #2 — append only, never reorder). getCatalogData_ reads by header NAME, so old 7-column
-// sheets and new 10-column sheets both parse.
+// sheets and newer sheets both parse.
 const CATALOG_HEADERS = ['Card', 'LastVerified', 'Benefit', 'Amount', 'Category', 'Reset', 'ReminderDays',
-                         'SourceUrl', 'PeriodBasis', 'Notes'];
+                         'SourceUrl', 'PeriodBasis', 'Notes', 'Issuer'];
 
 // ----------------------------- STRINGS (i18n) -----------------------------
 // All user-facing text lives here. Add a language = add a block. {placeholders} via fmt_().
@@ -544,6 +640,7 @@ function appendMissingCatalog_(sheet) {
       put('Amount', b.amount); put('Category', b.category); put('Reset', b.reset);
       put('ReminderDays', b.reminderDays); put('SourceUrl', b.sourceUrl || entry.sourceUrl || '');
       put('PeriodBasis', b.periodBasis || 'calendar'); put('Notes', b.notes || '');
+      put('Issuer', entry.issuer || '');
       newRows.push(row);
     });
   });
@@ -581,10 +678,75 @@ function restampCatalogDay() {
   return changed;
 }
 
+// OPT-IN, run from the editor after accepting a shipped catalog audit: refresh existing Catalog rows
+// that match a shipped card+benefit to the current CATALOG constant, then append any missing shipped
+// rows. This is deliberately NOT called by setup() because Catalog is user-editable and setup() must
+// stay append-only / preserve user edits by default. No rows are deleted, reordered, or cleared.
+function syncCatalogFromConstant() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.CATALOG_SHEET);
+  if (!sheet) { setupCatalog(); return { created: true, updated: 0, appended: 0 }; }
+  ensureHeaders_(sheet, CATALOG_HEADERS);
+  const updated = syncCatalogRowsFromConstant_(sheet);
+  const before = sheet.getLastRow();
+  appendMissingCatalog_(sheet);
+  return { created: false, updated: updated, appended: sheet.getLastRow() - before };
+}
+
+function syncCatalogRowsFromConstant_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  const idx = {}; header.forEach(function (h, i) { if (idx[h] == null) idx[h] = i; });
+  if (idx['Card'] == null || idx['Benefit'] == null) return 0;
+
+  const byKey = {};
+  Object.keys(CATALOG).forEach(function (card) {
+    const entry = CATALOG[card];
+    entry.benefits.forEach(function (b) {
+      byKey[dedupKey_(card, b.benefit)] = { entry: entry, benefit: b };
+    });
+  });
+
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let updated = 0;
+  values.forEach(function (row) {
+    const card = String(row[idx['Card']] || '').trim();
+    const benefit = String(row[idx['Benefit']] || '').trim();
+    const rec = byKey[dedupKey_(card, benefit)];
+    if (!rec) return;
+    let dirty = false;
+    const entry = rec.entry, b = rec.benefit;
+    const put = function (name, val) {
+      if (idx[name] == null) return;
+      const next = String(val == null ? '' : val);
+      if (String(row[idx[name]] == null ? '' : row[idx[name]]) === next) return;
+      row[idx[name]] = val;
+      dirty = true;
+    };
+    put('LastVerified', entry.lastVerified);
+    put('Amount', b.amount);
+    put('Category', b.category);
+    put('Reset', b.reset);
+    put('ReminderDays', b.reminderDays);
+    put('SourceUrl', b.sourceUrl || entry.sourceUrl || '');
+    put('PeriodBasis', b.periodBasis || 'calendar');
+    put('Notes', b.notes || '');
+    put('Issuer', entry.issuer || '');
+    if (dirty) updated++;
+  });
+  if (updated) {
+    if (idx['LastVerified'] != null) sheet.getRange(2, idx['LastVerified'] + 1, values.length, 1).setNumberFormat('@');
+    sheet.getRange(2, 1, values.length, lastCol).setValues(values);
+  }
+  return updated;
+}
+
 // Create + seed the editable Catalog sheet from the CATALOG constant. If it already exists (the user
 // may have edited it), append any missing columns (SourceUrl/PeriodBasis/Notes migration) AND any
-// newly-shipped cards/benefits — existing rows/values are preserved. SourceUrl/Notes seed blank
-// (filled by the user); PeriodBasis seeds from the constant so anniversary-basis benefits carry it.
+// newly-shipped cards/benefits — existing rows/values are preserved. SourceUrl/Notes seed from the
+// constant when known; PeriodBasis/Issuer seed from the constant so metadata survives sheet edits.
 function setupCatalog() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const existing = ss.getSheetByName(CONFIG.CATALOG_SHEET);
@@ -595,7 +757,8 @@ function setupCatalog() {
     const entry = CATALOG[card];
     entry.benefits.forEach(function (b) {
       rows.push([card, entry.lastVerified, b.benefit, b.amount, b.category, b.reset, b.reminderDays,
-                 b.sourceUrl || entry.sourceUrl || '', b.periodBasis || 'calendar', b.notes || '']);
+                 b.sourceUrl || entry.sourceUrl || '', b.periodBasis || 'calendar', b.notes || '',
+                 entry.issuer || '']);
     });
   });
   // LastVerified is plain-text so Sheets doesn't coerce 'YYYY-MM' into a Date (getCatalogData_ reads
@@ -970,6 +1133,33 @@ function getCardMeta_(card) {
     { annualFee: 0, anniversary: '', realizedSeed: 0, realizedSeedPeriod: '' };
 }
 
+// OPT-IN, editor-run helper after accepting catalog annual-fee updates. Dashboard/value-bar annual
+// fees come from the Cards sheet (user-editable), not the Catalog sheet; this refreshes existing
+// Cards rows that match a shipped CATALOG card. It does not add rows or touch anniversary/seed data.
+function syncCardFeesFromConstant() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.CARDS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  return syncCardFeesFromConstant_(sheet);
+}
+
+function syncCardFeesFromConstant_(sheet) {
+  const last = sheet.getLastRow();
+  if (last < 2) return 0;
+  const values = sheet.getRange(2, 1, last - 1, CARDS_HEADERS.length).getValues();
+  let changed = 0;
+  values.forEach(function (row) {
+    const card = String(row[0] == null ? '' : row[0]).trim();
+    const entry = CATALOG[card];
+    if (!entry) return;
+    const fee = Number(entry.annualFee) || 0;
+    if ((Number(row[1]) || 0) === fee) return;
+    row[1] = fee;
+    changed++;
+  });
+  if (changed) sheet.getRange(2, 1, values.length, CARDS_HEADERS.length).setValues(values);
+  return changed;
+}
+
 // Header-only creator used by setCardMeta when the Cards sheet doesn't exist yet (e.g. an old
 // deployment that hasn't re-run setup()). setup()/setupCards() seeds the catalog defaults.
 function ensureCardsSheet_() {
@@ -1072,9 +1262,9 @@ function catalogStale_(lastVerified, now) {
 }
 
 // The catalog as the wizard consumes it:
-//   { cards: [{ card, lastVerified, sourceUrl, benefits:[{ ..., sourceUrl, periodBasis, notes }] }] }
+//   { cards: [{ card, issuer, lastVerified, sourceUrl, benefits:[{ ..., sourceUrl, periodBasis, notes }] }] }
 // Prefers the editable Catalog sheet (so user edits win); falls back to the CATALOG constant. Reads
-// the sheet by HEADER NAME (not column position), so old 7-column and new 10-column sheets both work.
+// the sheet by HEADER NAME (not column position), so old 7-column and newer sheets both work.
 // Not auth-gated itself — callers (getCatalog / addCardsPage_) sit behind requireAuth_ / doGet.
 function getCatalogData_() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.CATALOG_SHEET);
@@ -1093,7 +1283,9 @@ function getCatalogData_() {
       if (!card || !benefit) return;  // skip blank/partial rows
       const lastVerified = verifiedKey_(col(v, 'LastVerified'));  // Date-coercion safe
       const sourceUrl = String(col(v, 'SourceUrl') || '').trim();
-      if (!byCard[card]) { byCard[card] = { card: card, annualFee: (CATALOG[card] ? Number(CATALOG[card].annualFee) || 0 : 0), lastVerified: lastVerified, lastVerifiedLabel: verifiedLabel_(lastVerified), sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
+      const issuer = String(col(v, 'Issuer') || (CATALOG[card] && CATALOG[card].issuer) || '').trim();
+      if (!byCard[card]) { byCard[card] = { card: card, issuer: issuer, annualFee: (CATALOG[card] ? Number(CATALOG[card].annualFee) || 0 : 0), lastVerified: lastVerified, lastVerifiedLabel: verifiedLabel_(lastVerified), sourceUrl: sourceUrl, benefits: [] }; order.push(card); }
+      if (!byCard[card].issuer && issuer) byCard[card].issuer = issuer;
       if (!byCard[card].lastVerified && lastVerified) { byCard[card].lastVerified = lastVerified; byCard[card].lastVerifiedLabel = verifiedLabel_(lastVerified); }  // first non-blank wins
       if (!byCard[card].sourceUrl && sourceUrl) byCard[card].sourceUrl = sourceUrl;
       byCard[card].benefits.push({
@@ -1116,6 +1308,7 @@ function getCatalogData_() {
       const entry = CATALOG[card];
       return {
         card: card,
+        issuer: entry.issuer || '',
         annualFee: Number(entry.annualFee) || 0,
         lastVerified: entry.lastVerified,
         lastVerifiedLabel: verifiedLabel_(entry.lastVerified),

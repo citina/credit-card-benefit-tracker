@@ -228,7 +228,7 @@ currentSheet = null;
 
 // ----- catalog freshness spine: header migration, header-based reads, stale-date parsing -----
 const GCD = sb.getCatalogData_, EH = sb.ensureHeaders_, MSV = sb.monthsSinceVerified_, CS = sb.catalogStale_;
-const CAT_H = ['Card','LastVerified','Benefit','Amount','Category','Reset','ReminderDays','SourceUrl','PeriodBasis','Notes'];
+const CAT_H = ['Card','LastVerified','Benefit','Amount','Category','Reset','ReminderDays','SourceUrl','PeriodBasis','Notes','Issuer'];
 // Catalog sheet stub: rows[0] is the header (row 1), rows[1..] are data; getRange is 1-indexed and
 // reads the header row too (unlike makeSheet, which models only data rows).
 function makeCatalogSheet(rows) {
@@ -260,20 +260,22 @@ var c7 = GCD().cards;
 t("catalog 7-col one card", c7.length, 1);
 t("catalog 7-col lastVerified", c7[0].lastVerified, '2026-06');
 t("catalog 7-col annualFee from constant", c7[0].annualFee, 325);  // Amex Gold fee comes from CATALOG (sheet has no fee col)
+t("catalog 7-col issuer falls back to constant", c7[0].issuer, 'American Express');
 t("catalog 7-col periodBasis default", c7[0].benefits[0].periodBasis, 'calendar');
 t("catalog 7-col sourceUrl default", c7[0].benefits[0].sourceUrl, '');
-// new 10-col parses the appended fields
+// new 11-col parses the appended fields
 currentCatalog = makeCatalogSheet([
   CAT_H.slice(),
-  ['CSR','2026-01','Annual travel','$300','travel','annual',30,'https://chase.com/x','anniversary','enroll first'],
+  ['CSR','2026-01','Annual travel','$300','travel','annual',30,'https://chase.com/x','anniversary','enroll first','Chase'],
 ]);
-var c10 = GCD().cards;
-t("catalog 10-col sourceUrl", c10[0].benefits[0].sourceUrl, 'https://chase.com/x');
-t("catalog 10-col periodBasis", c10[0].benefits[0].periodBasis, 'anniversary');
-t("catalog 10-col notes", c10[0].benefits[0].notes, 'enroll first');
-t("catalog 10-col card sourceUrl propagated", c10[0].sourceUrl, 'https://chase.com/x');
-t("catalog 10-col card lastVerifiedLabel", c10[0].lastVerifiedLabel, 'Jan 2026');
-t("catalog unknown card annualFee 0", c10[0].annualFee, 0);  // 'CSR' isn't a CATALOG key → fee defaults to 0
+var c11 = GCD().cards;
+t("catalog 11-col sourceUrl", c11[0].benefits[0].sourceUrl, 'https://chase.com/x');
+t("catalog 11-col periodBasis", c11[0].benefits[0].periodBasis, 'anniversary');
+t("catalog 11-col notes", c11[0].benefits[0].notes, 'enroll first');
+t("catalog 11-col issuer", c11[0].issuer, 'Chase');
+t("catalog 11-col card sourceUrl propagated", c11[0].sourceUrl, 'https://chase.com/x');
+t("catalog 11-col card lastVerifiedLabel", c11[0].lastVerifiedLabel, 'Jan 2026');
+t("catalog unknown card annualFee 0", c11[0].annualFee, 0);  // 'CSR' isn't a CATALOG key → fee defaults to 0
 // a LastVerified cell coerced to a Date by Sheets still normalizes + labels
 currentCatalog = makeCatalogSheet([
   CAT_H.slice(),
@@ -284,16 +286,57 @@ t("catalog coerced-Date canonical", cDate[0].lastVerified, '2026-01');
 t("catalog coerced-Date label", cDate[0].lastVerifiedLabel, 'Jan 2026');
 // header-based read is column-order independent
 currentCatalog = makeCatalogSheet([
-  ['Benefit','Card','PeriodBasis','Amount','Reset','Category','ReminderDays','Notes','LastVerified','SourceUrl'],
-  ['Annual travel','CSR','anniversary','$300','annual','travel',30,'note','2025-12','https://x'],
+  ['Benefit','Card','PeriodBasis','Amount','Reset','Category','ReminderDays','Notes','LastVerified','SourceUrl','Issuer'],
+  ['Annual travel','CSR','anniversary','$300','annual','travel',30,'note','2025-12','https://x','Chase'],
 ]);
 var cR = GCD().cards;
-t("catalog reordered cols read by name", [cR[0].card, cR[0].benefits[0].periodBasis, cR[0].benefits[0].reset], ['CSR','anniversary','annual']);
+t("catalog reordered cols read by name", [cR[0].card, cR[0].issuer, cR[0].benefits[0].periodBasis, cR[0].benefits[0].reset], ['CSR','Chase','anniversary','annual']);
 currentCatalog = null;
 // fallback path (no Catalog sheet): cards come from the CATALOG constant — each carries a numeric annualFee
 var cFallback = GCD().cards;
 t("catalog fallback every card has numeric annualFee", cFallback.every(c => typeof c.annualFee === 'number'), true);
+t("catalog fallback every card has issuer field", cFallback.every(c => Object.prototype.hasOwnProperty.call(c, 'issuer')), true);
+t("catalog fallback every card has nonblank issuer", cFallback.every(c => !!c.issuer), true);
 t("catalog fallback Amex Gold fee", (cFallback.find(c => c.card === 'Amex Gold') || {}).annualFee, 325);
+t("catalog fallback Amex Platinum fee", (cFallback.find(c => c.card === 'Amex Platinum') || {}).annualFee, 895);
+var platCat = cFallback.find(c => c.card === 'Amex Platinum') || { benefits: [] };
+t("catalog Amex Platinum refreshed benefits", platCat.benefits.map(b => b.benefit), [
+  'Uber Cash',
+  'Digital entertainment credit',
+  'Walmart+ membership',
+  'Resy dining credit',
+  'Lululemon credit',
+  'Hotel credit (FHR / Hotel Coll.)',
+  'Airline fee credit',
+  'CLEAR Plus credit',
+  'Oura Ring credit',
+  'Equinox credit',
+]);
+var brilliantCat = cFallback.find(c => c.card === 'Marriott Bonvoy Brilliant') || { benefits: [] };
+var brilliantFna = brilliantCat.benefits.find(b => b.benefit === 'Annual free night award') || {};
+t("catalog Brilliant has free-night value-on-use", [brilliantFna.amount, brilliantFna.periodBasis], ['Free night', 'anniversary']);
+var hiltonCat = cFallback.find(c => c.card === 'Hilton Honors Aspire') || { benefits: [] };
+t("catalog Hilton Aspire credits split", hiltonCat.benefits.map(b => [b.benefit, b.amount, b.reset]), [
+  ['Hilton resort credit', '$200', 'semiannual'],
+  ['Flight credit', '$50', 'quarterly'],
+  ['CLEAR Plus credit', '$209', 'annual'],
+  ['Annual free night reward', 'Free night', 'annual'],
+]);
+var deltaCat = cFallback.find(c => c.card === 'Delta SkyMiles Reserve') || { benefits: [] };
+var deltaCert = deltaCat.benefits.find(b => b.benefit === 'Companion Certificate') || {};
+t("catalog Delta companion value-on-use", [deltaCert.amount, deltaCert.periodBasis], ['Companion certificate', 'anniversary']);
+var bizCat = cFallback.find(c => c.card === 'Amex Business Platinum') || { benefits: [] };
+t("catalog Business Platinum split credits", bizCat.benefits.map(b => [b.benefit, b.amount, b.reset]), [
+  ['Hotel credit (FHR / Hotel Coll.)', '$300', 'semiannual'],
+  ['Hilton credit', '$50', 'quarterly'],
+  ['Airline fee credit', '$200', 'annual'],
+  ['CLEAR Plus credit', '$209', 'annual'],
+  ['Dell Technologies credit', '$150', 'annual'],
+  ['ChatGPT Business credit', '$300', 'annual'],
+  ['Adobe credit', '$250', 'annual'],
+  ['Indeed credit', '$90', 'quarterly'],
+  ['Wireless credit', '$10', 'monthly'],
+]);
 // verifiedKey_ / verifiedLabel_: robust to Sheets coercing 'YYYY-MM' into a Date
 const VK = sb.verifiedKey_, VL = sb.verifiedLabel_;
 t("verifiedKey passes string", VK('2026-06'), '2026-06');
@@ -322,7 +365,7 @@ currentCatalog = makeCatalogSheet([
 ]);
 const restampN = sb.restampCatalogDay();
 t("restamp count", restampN, 1);
-t("restamp upgrades month-only", currentCatalog._grid[1][1], '2026-06-19');
+t("restamp upgrades month-only", currentCatalog._grid[1][1], '2026-06-24');
 t("restamp preserves user day", currentCatalog._grid[2][1], '2026-06-15');
 t("restamp skips unknown card", currentCatalog._grid[3][1], '2026-06');
 t("restamp idempotent (2nd run no-op)", sb.restampCatalogDay(), 0);
@@ -330,7 +373,29 @@ currentCatalog = null;
 // shipped CATALOG constant is now day-precise everywhere (verified via the fallback path)
 var cDay = GCD().cards;
 t("catalog constant all day-precise", cDay.every(c => /^\d{4}-\d{2}-\d{2}$/.test(c.lastVerified)), true);
-t("catalog constant label shows day", (cDay.find(c => c.card === 'Amex Gold') || {}).lastVerifiedLabel, 'Jun 19, 2026');
+t("catalog constant label shows day", (cDay.find(c => c.card === 'Amex Gold') || {}).lastVerifiedLabel, 'Jun 24, 2026');
+// syncCatalogRowsFromConstant_(): opt-in editor-run helper for refreshing existing Catalog rows
+// after an accepted audit. It updates matching card+benefit rows by header name, without deleting rows.
+var syncSheet = makeCatalogSheet([
+  CAT_H.slice(),
+  ['Chase Sapphire Reserve', '2026-06-19', 'The Edit hotel credit', '$250', 'hotel', 'semiannual', 30, '', 'calendar', '', ''],
+  ['Chase Sapphire Reserve', '2026-06-19', 'Peloton credit', '$120', 'other', 'annual', 30, '', 'calendar', '', ''],
+  ['Manual Card', '2026-01-01', 'Manual benefit', '$1', 'other', 'monthly', 7, '', 'calendar', 'keep me', ''],
+]);
+const syncN = sb.syncCatalogRowsFromConstant_(syncSheet);
+t("syncCatalog updates matching rows count", syncN, 2);
+t("syncCatalog refreshes The Edit amount/reset", [syncSheet._grid[1][1], syncSheet._grid[1][3], syncSheet._grid[1][5], syncSheet._grid[1][10]], ['2026-06-24', '$500', 'annual', 'Chase']);
+t("syncCatalog refreshes Peloton amount/reset", [syncSheet._grid[2][3], syncSheet._grid[2][5], syncSheet._grid[2][6]], ['$10', 'monthly', 7]);
+t("syncCatalog leaves unknown rows alone", syncSheet._grid[3], ['Manual Card', '2026-01-01', 'Manual benefit', '$1', 'other', 'monthly', 7, '', 'calendar', 'keep me', '']);
+// syncCardFeesFromConstant_(): opt-in Cards-sheet annual-fee refresh. Dashboard reads Cards, so
+// catalog fee changes need this helper for already-added cards.
+var feeSheet = makeSheet([
+  ['Amex Platinum', 695, '06-01', 12, '2026'],
+  ['Manual Card', 123, '01-01', 0, ''],
+]);
+t("syncCardFees count", sb.syncCardFeesFromConstant_(feeSheet), 1);
+t("syncCardFees updates Platinum fee", feeSheet._grid[0], ['Amex Platinum', 895, '06-01', 12, '2026']);
+t("syncCardFees leaves unknown card", feeSheet._grid[1], ['Manual Card', 123, '01-01', 0, '']);
 // stale-date parsing: YYYY-MM and YYYY-MM-DD; coerced Date; unparseable/blank → not stale
 t("monthsSince YYYY-MM", MSV('2026-01', U(2026, 6, 18)), 5);
 t("monthsSince YYYY-MM-DD ignores day", MSV('2025-12-31', U(2026, 6, 18)), 6);
@@ -348,6 +413,9 @@ var apSheet = makeCatalogSheet([CAT_H.slice()]);  // header only
 sb.appendMissingCatalog_(apSheet);
 var apCards = apSheet._grid.slice(1).map(r => r[0]);
 t("appendMissingCatalog adds a new card", apCards.indexOf('Capital One Venture X') !== -1, true);
+t("appendMissingCatalog adds audited cards", ['Hilton Honors Aspire','Delta SkyMiles Reserve','Amex Business Platinum'].every(c => apCards.indexOf(c) !== -1), true);
+var apBizWireless = apSheet._grid.find(r => r[0] === 'Amex Business Platinum' && r[2] === 'Wireless credit') || [];
+t("appendMissingCatalog writes issuer for appended rows", apBizWireless[10], 'American Express');
 var apN = apSheet._grid.length;
 sb.appendMissingCatalog_(apSheet);
 t("appendMissingCatalog idempotent", apSheet._grid.length, apN);

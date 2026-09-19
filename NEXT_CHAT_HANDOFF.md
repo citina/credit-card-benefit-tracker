@@ -36,7 +36,7 @@ The user will run a dedicated session to audit ALL cards' **naming / issuer / be
 
 ### What this session built (all on `feature/wizard-polish`)
 The previous session's product review (the old contents of this file) is now **implemented** — details live in `HANDOFF.md` "Current state" + data model, and `PITFALLS.md` #17–19. Summary:
-- **Catalog-freshness suite** (the headline feature): `Catalog` sheet 7→10 cols (`+SourceUrl/PeriodBasis/Notes`, append-migrated by `ensureHeaders_`); `getCatalogData_` reads **by header name**; wizard shows `Last verified: <Mon YYYY>` + optional Source link + "Review recommended" stale flag; `reviewStaleCatalog()` monthly read-only email (never auto-edits — semi-automatic by design).
+- **Catalog-freshness suite** (the headline feature): `Catalog` sheet 7→11 cols (`+SourceUrl/PeriodBasis/Notes/Issuer`, append-migrated by `ensureHeaders_`); `getCatalogData_` reads **by header name**; wizard shows `Last verified: <Mon YYYY>` + optional Source link + "Review recommended" stale flag; `reviewStaleCatalog()` monthly read-only email (never auto-edits — semi-automatic by design).
 - **Quick wins**: NUL-byte fix in `dedupKey_`; two-pass edit-mode dedup + **client duplicate-name guard** (blocks save, asks to rename); `Clear all` confirm; `previewReminders()` read-only editor diagnostic.
 - **Reminder cadence preset**: `CONFIG.REMINDER_CADENCE` `'minimal'` | `'persistent'` (+ `REMINDER_REPEAT_DAYS`).
 - **Bug fix — raw date**: Sheets had coerced `Catalog.LastVerified` into a Date → showed "Mon Jun 01 2026 00:00:00 GMT-0700…" **and** silently broke stale detection. `verifiedKey_`/`verifiedLabel_` normalize string-or-Date on read (realm-safe `Object.prototype.toString`, not `instanceof`).
