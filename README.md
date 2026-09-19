@@ -7,16 +7,13 @@ third-party services, no bank linking.
 
 It's not a rewards optimizer. It just makes sure you use the credits you're paying an annual fee for.
 
-<table>
-  <tr>
-    <th width="50%">Daily reminder email (sent from you, to you)</th>
-    <th width="50%">Dashboard (your private web app)</th>
-  </tr>
-  <tr>
-    <td valign="top"><img src="docs/screenshots/email.png" alt="Reminder email from the user to themselves, listing three credits that expire in 3 days, each with Done and Snooze buttons"></td>
-    <td valign="top"><img src="docs/screenshots/dashboard.png" alt="Dashboard in a browser window: two cards, each with an annual-fee progress bar and its benefits marked To use, Snoozed, or Done"></td>
-  </tr>
-</table>
+**Daily reminder email**, sent from you, to you:
+
+![Reminder email from the user to themselves, listing three credits that expire in 3 days, each with Done and Snooze buttons](docs/screenshots/email.png)
+
+**Dashboard**, your private web app:
+
+![Dashboard in a browser window: two cards, each with an annual-fee progress bar and its benefits marked To use, Snoozed, or Done](docs/screenshots/dashboard.png)
 
 <sub>The email and dashboard content is rendered from this repo's code with made-up demo data; the mail and browser windows around them are mockups.</sub>
 
