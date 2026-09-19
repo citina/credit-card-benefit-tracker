@@ -1,6 +1,6 @@
 # Next Chat Handoff — Credit Card Benefit Tracker
 
-**Single thing to read first, then `HANDOFF.md` (canonical state) / `PITFALLS.md` (踩过的坑) / `BUILD_SPEC.md` (design) / `SETUP.md` (deploy) as needed.** `verify.js` is a local Node harness (NOT deployed). The user replies in **Chinese** (keep deployment steps / technical terms in English) and likes a **diff per major step + `node verify.js` green before continuing**.
+**Single thing to read first, then `HANDOFF.md` (canonical state) / `PITFALLS.md` (踩过的坑) / `BUILD_SPEC.md` (design) / `SETUP.md` (deploy) as needed.** `verify.js` is a local Node harness (NOT deployed). Keep **`node verify.js` green** before continuing.
 
 ---
 
