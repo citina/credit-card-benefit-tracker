@@ -307,5 +307,17 @@ t("appendMissingCatalog idempotent", apSheet._grid.length, apN);
 var apSheet2 = makeCatalogSheet([CAT_H.slice(), ['Amex Gold', '2026-06', 'Uber Cash', '$10', 'other', 'monthly', 4, '', 'calendar', '']]);
 sb.appendMissingCatalog_(apSheet2);
 t("appendMissingCatalog keeps existing unique", apSheet2._grid.slice(1).filter(r => r[0] === 'Amex Gold' && r[2] === 'Uber Cash').length, 1);
+// webAppUrl_(): the WEBAPP_URL Script Property (trimmed) wins; unset/blank falls back to
+// getService().getUrl(). The two stubs are removed afterwards so the sandbox stays as before.
+var wuProps = {};
+sb.PropertiesService = { getScriptProperties: () => ({ getProperty: (k) => (k in wuProps ? wuProps[k] : null) }) };
+sb.ScriptApp = { getService: () => ({ getUrl: () => 'https://fallback/exec' }) };
+wuProps = { WEBAPP_URL: ' https://pinned/exec ' };
+t("webAppUrl_ prefers the Script Property (trimmed)", sb.webAppUrl_(), 'https://pinned/exec');
+wuProps = { WEBAPP_URL: '   ' };
+t("webAppUrl_ blank property falls back", sb.webAppUrl_(), 'https://fallback/exec');
+wuProps = {};
+t("webAppUrl_ unset property falls back", sb.webAppUrl_(), 'https://fallback/exec');
+delete sb.PropertiesService; delete sb.ScriptApp;
 console.log("logic asserts: " + pass + " passed, " + fail + " failed");
 if (fail || !okAll) process.exitCode = 1;

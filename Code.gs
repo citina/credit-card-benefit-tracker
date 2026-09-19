@@ -9,10 +9,9 @@ const CONFIG = {
   LANG: 'en',                                     // 'en' | 'zh'
   AUTHORIZED_EMAILS: [],                          // empty = owner-only. Only meaningful in "Anyone" access (Workspace).
   TOKEN: 'CHANGE_ME_to_a_long_random_string',    // defense-in-depth; required only in "Anyone" sharing mode
-  // The deployed web-app /exec URL. Pin it here so email links (built from a trigger context)
-  // don't depend on ScriptApp.getService().getUrl(), which can resolve to a stale/broken
-  // deployment. Leave '' to fall back to getService().getUrl(). Update after a NEW deployment.
-  WEBAPP_URL: '',
+  // The deployed web-app /exec URL is NOT set here: it lives in the Script Property WEBAPP_URL
+  // (Project Settings → Script properties), so it survives pasting new code and never gets
+  // committed. See SETUP.md step 5 and webAppUrl_().
   DEFAULT_REMINDER_DAYS: 4,
   SNOOZE_DEFAULT_DAYS: 3,
   DAILY_HOUR: 9,                                  // 24h, script timezone
@@ -445,6 +444,7 @@ function setup() {
   ScriptApp.newTrigger('reviewStaleCatalog')             // monthly: nudge to re-verify stale catalog rows
     .timeBased().onMonthDay(1).atHour(CONFIG.CATALOG_REVIEW_HOUR).create();
   Logger.log('Setup complete. Now deploy as a Web App (execute as me, access "Only myself").');
+  if (!pinnedWebAppUrl_()) Logger.log('Then set the Script Property WEBAPP_URL to the /exec URL (SETUP.md step 5).');
 }
 
 function seedExamples_(sheet) {
@@ -1321,10 +1321,15 @@ function catalogReviewHtml_(cards, now) {
   return html;
 }
 
-// Prefer the pinned CONFIG.WEBAPP_URL (deterministic across trigger/editor/web contexts);
-// fall back to the active deployment's URL when it's not set.
+// Prefer the pinned WEBAPP_URL Script Property (deterministic across trigger/editor/web contexts);
+// fall back to the active deployment's URL when it's not set. From a trigger context
+// getService().getUrl() can resolve to a stale/broken deployment (PITFALLS #15).
 function webAppUrl_() {
-  return CONFIG.WEBAPP_URL || ScriptApp.getService().getUrl();
+  return pinnedWebAppUrl_() || ScriptApp.getService().getUrl();
+}
+
+function pinnedWebAppUrl_() {
+  return String(PropertiesService.getScriptProperties().getProperty('WEBAPP_URL') || '').trim();
 }
 
 function actionUrl_(url, action, id, extra) {

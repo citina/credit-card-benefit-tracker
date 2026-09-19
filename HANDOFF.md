@@ -6,7 +6,7 @@
 - **`PITFALLS.md`** — non-obvious traps (踩过的坑). **Read before changing the engine.**
 - **`Code.gs` / `Index.html` / `Confirm.html` / `AddCards.html`** — the app. **`verify.js`** — local test harness (NOT deployed).
 
-_Snapshot: 2026-06-17. Repo is local-only (no git remote)._
+_Snapshot: 2026-06-17. Public on GitHub since 2026-09-19: `citina/credit-card-benefit-tracker`._
 
 ## ✅ FIXED 2026-06-17 — `/exec` web-app links showed Google Drive "unable to open the file"
 
@@ -16,7 +16,7 @@ _Snapshot: 2026-06-17. Repo is local-only (no git remote)._
 
 **Fix:** **created a NEW deployment** (Deploy → New deployment → Web app → Execute as **Me** / **Only myself**) → fresh URL `<new-deployment-id>/exec` opened cleanly. Then **pinned that URL into `CONFIG.WEBAPP_URL`** and routed all 5 URL call sites through a new `webAppUrl_()` helper (`CONFIG.WEBAPP_URL || ScriptApp.getService().getUrl()`), so trigger-generated email links no longer depend on `getService().getUrl()` (which can resolve to a stale/broken deployment). See PITFALLS #15.
 
-**⚠️ Maintenance:** if you ever **create another new deployment** (new `AKfycb…/exec` URL), you **must** update `CONFIG.WEBAPP_URL` to match, or email links point at the old one. Editing the *existing* deployment to a **New version** keeps the URL — that's the normal path.
+**⚠️ Maintenance:** if you ever **create another new deployment** (new `AKfycb…/exec` URL), you **must** update the `WEBAPP_URL` **Script Property** to match (it moved out of `CONFIG` when the repo went public — PITFALLS #15), or email links point at the old one. Editing the *existing* deployment to a **New version** keeps the URL — that's the normal path.
 
 ## What it is
 A credit-card recurring-benefit tracker on **Google Apps Script + Sheets + Gmail**, deployed as a private web app (**execute as me / access "Only myself"**). It solves one problem: *forgetting to use use-it-or-lose-it card credits before they expire.* Daily email reminder + a web dashboard + an in-app add/edit-cards wizard. Bilingual en/zh (`CONFIG.LANG`). Data lives in the owner's own Google Sheet; status is **derived, not stored** (a benefit is "done" when `LastDonePeriod == periodKey_`, so it auto-resets at period boundaries — no reset job).
@@ -48,7 +48,7 @@ A credit-card recurring-benefit tracker on **Google Apps Script + Sheets + Gmail
 - Re-deploying after this feature: re-paste `Code.gs` / `Index` / `AddCards` (`Confirm` unchanged) + re-run `setup()`.
 
 ## Next steps / backlog
-1. **Open-source it (user goal — make it set-up-able by others).** TODO: add a `README.md` (overview + quick start, point to `SETUP.md`); pick a license (e.g. MIT); confirm no personal data ships (`CONFIG.EMAIL` auto-derives from the runner; `TOKEN` is a placeholder; catalog/examples carry no personal info — OK); consider a copy-this-Sheet template link or a `clasp` workflow so non-coders can deploy; surface the security model (BUILD_SPEC) prominently for self-hosters. `SETUP.md` already covers install steps.
+1. **Open-source it — mostly DONE 2026-09-19.** Public repo `citina/credit-card-benefit-tracker`; `README.md` (overview, security model, quick start → `SETUP.md`) + MIT `LICENSE`; the pinned `/exec` URL moved from `CONFIG.WEBAPP_URL` to the `WEBAPP_URL` Script Property; git history scrubbed of deployment URLs and commit email switched to the GitHub noreply address before the first push. _Remaining:_ a copy-this-Sheet template link or a `clasp` workflow so non-coders can deploy.
 2. **Partial-use benefits.** CSR DoorDash $25 = $5 + 2×$10; marking done counts the **full** $25 toward the bar (over-counts). Options: split into per-sub-credit rows, or a "used X of Y" multi-use model (new storage + UI).
 2b. **Conditional / spend-gated benefits.** Some perks unlock only after annual spend (e.g. CSR's extra $500 The Edit credit after $75k/yr) or are non-$ status perks. The tracker has **no spend/transaction data** so it can't auto-unlock these. Workable today: add such a credit only once unlocked, with the caveat in the new `Notes` column ("after $75k spend"). Non-$ perks (status, free night, points boost) are out of scope. Possible later: a `Notes`-surfacing or an "unlocked?" toggle.
 3. **Catalog freshness — BUILT 2026-06-19** (freshness line + Source link + stale flag + `reviewStaleCatalog()` monthly email; semi-automatic, never auto-edits). _Remaining:_ (a) **persist `PeriodBasis` into `Benefits`** so a renamed benefit keeps its anniversary basis (today it's re-derived from `CATALOG` by name — review #4/#9); (b) data correction: CSR **The Edit** ($250 semiannual in code; from 2026 both $250s are usable anytime in the year); (c) optional Cards-sheet annual-fee freshness columns (`AnnualFeeLastVerified` / `AnnualFeeSourceUrl`).

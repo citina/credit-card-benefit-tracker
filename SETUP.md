@@ -19,9 +19,8 @@ inside your own Google account. No third-party services, no bank linking.
 - `AUTHORIZED_EMAILS` — leave `[]` for owner-only (the normal, most secure case).
 - `TOKEN` — optional under the default private deployment; you can leave it as-is. It only
   matters if you later switch to a shared "Anyone" deployment.
-- `WEBAPP_URL` — leave `''` for now; you set it in step 5 once you have a deployed `/exec` URL.
-  Pinning it makes reminder-email links deterministic (a daily-trigger run otherwise relies on
-  `getService().getUrl()`, which can point at a stale deployment).
+- The web-app URL is **not** set here — you add it as a Script Property in step 5, once you have a
+  deployed `/exec` URL (so it survives pasting in new code and never ends up in a commit).
 - `DAILY_HOUR`, `SNOOZE_DEFAULT_DAYS` — tune to taste. (`DEFAULT_REMINDER_DAYS` is legacy —
   reminders are now period-driven and don't use it.)
 
@@ -40,17 +39,19 @@ reminder hour and the monthly/annual reset boundaries both follow it.
 3. **Who has access: Only myself.**  ← this is what keeps it private.
 4. **Deploy**, then copy the **Web app URL** (ends in `/exec`). That's your dashboard; reminder
    emails link to it.
-5. **Pin it:** paste that `/exec` URL into `CONFIG.WEBAPP_URL` in `Code.gs`, **Save**, then push a
-   **New version** (Deploy → Manage deployments → pencil/Edit → Version: New version → Deploy —
-   this keeps the same URL). This makes email links reliable regardless of trigger context.
+5. **Pin it:** in the Apps Script editor, ⚙️ **Project Settings → Script properties → Add script
+   property** — Property `WEBAPP_URL`, Value = that `/exec` URL → **Save script properties**. No
+   redeploy needed (it's read at run time). This makes reminder-email links reliable regardless of
+   trigger context (a daily-trigger run otherwise relies on `getService().getUrl()`, which can
+   point at a stale deployment).
 
 > Because access is "Only myself", only your signed-in Google account can open the dashboard or
 > the email links. On your own phone you're already signed in, so the links just work.
 
 > **If a link ever shows Google's "Sorry, unable to open the file at this time":** the `/exec`
 > deployment's serving state is likely corrupted. Create a **New deployment** (not just a new
-> version) to get a fresh `/exec` URL, then **update `CONFIG.WEBAPP_URL` to the new URL** and push
-> a new version. See PITFALLS #15.
+> version) to get a fresh `/exec` URL, then **update the `WEBAPP_URL` Script Property to the new
+> URL**. See PITFALLS #15.
 
 ## 6. Add your cards
 Open the web app URL and click **+ Add cards** (top-right), or go straight to `?view=add`. Pick a
